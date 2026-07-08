@@ -39,11 +39,23 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env: at minimum set a real SECRET_KEY.
 # Leave SMTP_HOST empty for local dev - 2FA codes are logged instead of emailed.
+# Leave DATABASE_URL as the default sqlite line for quick local testing.
 
 uvicorn app.main:app --reload
 ```
 
 API docs are then available at `http://localhost:8000/docs`.
+
+### Database
+
+SQLite (the `.env.example` default) is only for quick local testing. CT210
+runs **Postgres** - set `DATABASE_URL` to
+`postgresql+psycopg2://<user>:<password>@localhost:5432/<dbname>` and make
+sure `psycopg2-binary` is installed (already in `requirements.txt`). No
+migration tool (Alembic) is wired up yet - `Base.metadata.create_all()` in
+`app/main.py`'s lifespan handler creates tables on startup, which is fine
+while the schema is still moving but should be replaced with real migrations
+before this holds production data.
 
 ## Running tests
 
