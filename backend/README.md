@@ -46,6 +46,9 @@ uvicorn app.main:app --reload
 
 API docs are then available at `http://localhost:8000/docs`.
 
+Once `frontend/dist` exists (see `../frontend/README.md`), this same process
+also serves the built frontend - see "Serving the frontend" below.
+
 ### Database
 
 SQLite (the `.env.example` default) is only for quick local testing. CT210
@@ -69,28 +72,43 @@ lab-exclusivity bugs described above as regression tests.
 
 ## API overview
 
+Everything lives under `/api` so it can never collide with a frontend route
+of the same name once the SPA is served from the same origin (e.g.
+`GET /api/labs` vs. the frontend's `/labs` page).
+
 | Endpoint | Method | Notes |
 |---|---|---|
-| `/auth/captcha` | GET | Math captcha, stored in session |
-| `/auth/csrf-token` | GET | CSRF token, stored in session |
-| `/auth/register` | POST | Honeypot + CSRF + captcha + IP rate limit |
-| `/auth/login` | POST | Starts 2FA if enabled, sets `pending_2fa_user_id` in session |
-| `/auth/verify-2fa` | POST | Reads pending user id from session, not the request body |
-| `/auth/resend-2fa` | POST | Same - session-scoped, can't be used to spam another account |
-| `/auth/logout` | POST | Clears the session |
-| `/auth/me` | GET | Current user, resolved from session |
-| `/labs` | GET | List labs (any authenticated user) |
-| `/labs` | POST | Create lab - requires `role == admin`, checked server-side |
-| `/reservations/mine` | GET | Current user's open reservations |
-| `/reservations` | POST | Book a future date/time slot |
-| `/reservations/queue` | POST | Join the immediate queue for a lab |
-| `/reservations/{id}/cancel` | POST | Cancel, then renumber the lab's queue |
-| `/reservations/{id}/start` | POST | Promote a pending reservation to active, if it's actually your turn *and* the lab isn't occupied |
-| `/reservations/{id}/complete` | POST | Finish a session, then renumber the queue |
+| `/api/auth/captcha` | GET | Math captcha, stored in session |
+| `/api/auth/csrf-token` | GET | CSRF token, stored in session |
+| `/api/auth/register` | POST | Honeypot + CSRF + captcha + IP rate limit |
+| `/api/auth/login` | POST | Starts 2FA if enabled, sets `pending_2fa_user_id` in session |
+| `/api/auth/verify-2fa` | POST | Reads pending user id from session, not the request body |
+| `/api/auth/resend-2fa` | POST | Same - session-scoped, can't be used to spam another account |
+| `/api/auth/logout` | POST | Clears the session |
+| `/api/auth/me` | GET | Current user, resolved from session |
+| `/api/labs` | GET | List labs (any authenticated user) |
+| `/api/labs` | POST | Create lab - requires `role == admin`, checked server-side |
+| `/api/reservations/mine` | GET | Current user's open reservations |
+| `/api/reservations` | POST | Book a future date/time slot |
+| `/api/reservations/queue` | POST | Join the immediate queue for a lab |
+| `/api/reservations/{id}/cancel` | POST | Cancel, then renumber the lab's queue |
+| `/api/reservations/{id}/start` | POST | Promote a pending reservation to active, if it's actually your turn *and* the lab isn't occupied |
+| `/api/reservations/{id}/complete` | POST | Finish a session, then renumber the queue |
+| `/api/users` | GET | List users - admin only |
+| `/api/users/{id}` | DELETE | Delete a user - admin only, blocks self-deletion and users with reservation history |
+| `/health` | GET | Not under `/api` - plain infra health check |
 
 A background task (`app/main.py::_expiry_sweep_loop`) periodically expires
 overdue reservations server-side, so a slot is freed even if the user just
 closes their browser tab - the old repo relied on the client to call this.
+
+## Serving the frontend
+
+`app/main.py` mounts `../frontend/dist` (if it exists) and serves
+`index.html` as a fallback for any path that isn't an `/api/*` route or an
+existing static file, so React Router's client-side routes work on a hard
+refresh. Build the frontend first (see `../frontend/README.md`), then start
+this backend normally - no separate frontend server needed in production.
 
 ## Deliberately deferred (see project migration plan)
 

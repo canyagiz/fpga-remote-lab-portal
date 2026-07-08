@@ -1,11 +1,11 @@
 def register(client, username, email, password="password123"):
-    csrf = client.get("/auth/csrf-token").json()["token"]
-    question = client.get("/auth/captcha").json()["question"]
+    csrf = client.get("/api/auth/csrf-token").json()["token"]
+    question = client.get("/api/auth/captcha").json()["question"]
     n1, op, n2 = question.replace("What is ", "").replace("?", "").split(" ")
     answer = int(n1) + int(n2) if op == "+" else int(n1) - int(n2)
 
     response = client.post(
-        "/auth/register",
+        "/api/auth/register",
         json={
             "username": username,
             "email": email,
@@ -23,7 +23,7 @@ def login(client, username, password="password123"):
     from app.models import TwoFactorCode, User
 
     client.cookies.clear()
-    response = client.post("/auth/login", json={"username": username, "password": password})
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text
 
     db = SessionLocal()
@@ -39,7 +39,7 @@ def login(client, username, password="password123"):
     finally:
         db.close()
 
-    verify = client.post("/auth/verify-2fa", json={"code": code})
+    verify = client.post("/api/auth/verify-2fa", json={"code": code})
     assert verify.status_code == 200, verify.text
     return user_id
 

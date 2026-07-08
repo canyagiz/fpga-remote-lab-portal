@@ -1,9 +1,12 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import FileResponse
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
@@ -58,12 +61,32 @@ app.add_middleware(
     https_only=settings.session_cookie_secure,
 )
 
-app.include_router(auth.router)
-app.include_router(labs.router)
-app.include_router(reservations.router)
-app.include_router(users.router)
+# Everything lives under /api so it can never collide with a frontend
+# route of the same name (e.g. GET /api/labs vs. the SPA's /labs page,
+# both served from the same origin).
+app.include_router(auth.router, prefix="/api")
+app.include_router(labs.router, prefix="/api")
+app.include_router(reservations.router, prefix="/api")
+app.include_router(users.router, prefix="/api")
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Serve the built frontend (frontend/dist, a sibling of this backend/
+# directory) from the same origin as the API. Any path that isn't an API
+# route or an existing static asset falls back to index.html, so React
+# Router's client-side routes (e.g. /dashboard) work on a hard refresh too.
+_frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+if _frontend_dist.is_dir():
+    app.mount("/assets", StaticFiles(directory=_frontend_dist / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str):
+        candidate = _frontend_dist / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_frontend_dist / "index.html")

@@ -10,6 +10,10 @@ __pycache__/
 *.db
 *.sqlite
 
+# Node / frontend
+node_modules/
+dist/
+
 # Editor
 .vscode/
 .idea/

@@ -7,7 +7,7 @@ def _create_lab(client):
     register(client, "admin", "admin@example.com")
     login(client, "admin")
     make_admin("admin")
-    lab_id = client.post("/labs", json={"name": "Arty Z7", "description": "FPGA board"}).json()["id"]
+    lab_id = client.post("/api/labs", json={"name": "Arty Z7", "description": "FPGA board"}).json()["id"]
     return lab_id
 
 
@@ -24,28 +24,28 @@ def test_queue_advances_through_three_users(client):
     register(client, "user3", "user3@example.com")
 
     login(client, "user1")
-    resv1 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv1 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv1["status"] == "active" and resv1["queue_position"] == 0
 
     login(client, "user2")
-    resv2 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv2 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv2["status"] == "pending" and resv2["queue_position"] == 0
 
     login(client, "user3")
-    resv3 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv3 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv3["status"] == "pending" and resv3["queue_position"] == 1
 
     login(client, "user1")
-    client.post(f"/reservations/{resv1['id']}/complete")
+    client.post(f"/api/reservations/{resv1['id']}/complete")
 
     login(client, "user2")
-    mine = client.get("/reservations/mine").json()
+    mine = client.get("/api/reservations/mine").json()
     assert mine[0]["queue_position"] == 0
-    started = client.post(f"/reservations/{resv2['id']}/start")
+    started = client.post(f"/api/reservations/{resv2['id']}/start")
     assert started.status_code == 200 and started.json()["status"] == "active"
 
     login(client, "user3")
-    mine = client.get("/reservations/mine").json()
+    mine = client.get("/api/reservations/mine").json()
     assert mine[0]["queue_position"] == 0
 
 
@@ -60,21 +60,21 @@ def test_being_first_in_queue_does_not_bypass_an_active_session(client):
     register(client, "user2", "user2@example.com")
 
     login(client, "user1")
-    resv1 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv1 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv1["status"] == "active"
 
     login(client, "user2")
-    resv2 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv2 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv2["status"] == "pending" and resv2["queue_position"] == 0
 
-    response = client.post(f"/reservations/{resv2['id']}/start")
+    response = client.post(f"/api/reservations/{resv2['id']}/start")
     assert response.status_code == 409
 
     login(client, "user1")
-    client.post(f"/reservations/{resv1['id']}/complete")
+    client.post(f"/api/reservations/{resv1['id']}/complete")
 
     login(client, "user2")
-    response = client.post(f"/reservations/{resv2['id']}/start")
+    response = client.post(f"/api/reservations/{resv2['id']}/start")
     assert response.status_code == 200
     assert response.json()["status"] == "active"
 
@@ -89,22 +89,22 @@ def test_cancel_frees_the_slot_for_a_new_booking(client):
 
     login(client, "user1")
     resv = client.post(
-        "/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
+        "/api/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
     ).json()
 
     login(client, "user2")
     conflict = client.post(
-        "/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
+        "/api/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
     )
     assert conflict.status_code == 409
 
     login(client, "user1")
-    cancelled = client.post(f"/reservations/{resv['id']}/cancel")
+    cancelled = client.post(f"/api/reservations/{resv['id']}/cancel")
     assert cancelled.status_code == 200 and cancelled.json()["status"] == "cancelled"
 
     login(client, "user2")
     retry = client.post(
-        "/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
+        "/api/reservations", json={"lab_id": lab_id, "reservation_date": date_str, "reservation_time": time_str}
     )
     assert retry.status_code == 201
 
@@ -116,7 +116,7 @@ def test_reservation_requires_minimum_advance_notice(client):
 
     too_soon = datetime.utcnow() + timedelta(minutes=1)
     response = client.post(
-        "/reservations",
+        "/api/reservations",
         json={
             "lab_id": lab_id,
             "reservation_date": too_soon.date().isoformat(),
@@ -136,10 +136,10 @@ def test_expiry_sweep_frees_an_overrun_active_session(client):
     register(client, "user2", "user2@example.com")
 
     login(client, "user1")
-    resv1 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv1 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
 
     login(client, "user2")
-    resv2 = client.post("/reservations/queue", json={"lab_id": lab_id}).json()
+    resv2 = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
     assert resv2["status"] == "pending"
 
     # Simulate user1 having overrun their session time without finishing.
@@ -159,7 +159,7 @@ def test_expiry_sweep_frees_an_overrun_active_session(client):
     assert expired_count == 1
 
     login(client, "user2")
-    mine = client.get("/reservations/mine").json()
+    mine = client.get("/api/reservations/mine").json()
     assert mine[0]["queue_position"] == 0
-    started = client.post(f"/reservations/{resv2['id']}/start")
+    started = client.post(f"/api/reservations/{resv2['id']}/start")
     assert started.status_code == 200 and started.json()["status"] == "active"
