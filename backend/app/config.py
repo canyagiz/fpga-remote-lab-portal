@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     smtp_host: str = ""
     smtp_port: int = 465
+    # "ssl" (implicit TLS, e.g. port 465), "starttls" (e.g. port 587), or
+    # "plain" (no TLS, no auth - only for a local mock server like Mailpit).
+    smtp_mode: str = "ssl"
     smtp_username: str = ""
     smtp_password: str = ""
     mail_from_email: str = "noreply@h-brs.de"

@@ -34,8 +34,18 @@ def send_two_factor_code(to_email: str, username: str, code: str) -> bool:
     message.attach(MIMEText(html_body, "html"))
 
     try:
-        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port) as server:
-            server.login(settings.smtp_username, settings.smtp_password)
+        if settings.smtp_mode == "ssl":
+            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port)
+        else:
+            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port)
+            if settings.smtp_mode == "starttls":
+                server.starttls()
+
+        with server:
+            # A mock server like Mailpit needs no credentials - only
+            # authenticate when we actually have a username configured.
+            if settings.smtp_username:
+                server.login(settings.smtp_username, settings.smtp_password)
             server.sendmail(settings.mail_from_email, [to_email], message.as_string())
         return True
     except smtplib.SMTPException:
