@@ -12,12 +12,12 @@ export default function Navbar() {
   }
 
   return (
-    <nav className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-7 py-3">
-      <Link to="/" className="flex items-center gap-5 font-bold tracking-tight text-foreground">
-        <img src="/logo.png" alt="" className="h-24 w-auto" />
-        <span className="text-2xl">FPGA Remote Lab</span>
-        <span className="h-16 w-px bg-border" />
-        <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-16 w-auto" />
+    <nav className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-7 py-1.5">
+      <Link to="/" className="flex items-center gap-4 font-bold tracking-tight text-foreground">
+        <img src="/logo.png" alt="" className="h-16 w-auto" />
+        <span className="text-xl">FPGA Remote Lab</span>
+        <span className="h-11 w-px bg-border" />
+        <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-11 w-auto" />
       </Link>
       <div className="flex items-center gap-5 text-sm">
         {user ? (
