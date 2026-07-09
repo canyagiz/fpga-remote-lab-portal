@@ -146,6 +146,11 @@ def verify_two_factor(payload: Verify2FARequest, request: Request, db: Session =
 
     code_row.used = True
     user = db.get(User, user_id)
+    # 2FA is only meant to confirm the email address once, right after
+    # registration - not on every subsequent login. The first successful
+    # verification turns it off for this account; future logins skip
+    # straight through.
+    user.two_factor_enabled = False
     db.commit()
 
     request.session.pop("pending_2fa_user_id", None)

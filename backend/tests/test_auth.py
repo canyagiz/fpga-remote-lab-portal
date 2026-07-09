@@ -59,6 +59,25 @@ def test_login_requires_2fa_and_session_gates_me(client):
     assert client.get("/api/auth/me").status_code == 200
 
 
+def test_2fa_only_required_on_first_login(client):
+    """2FA should confirm the email address once, right after registration -
+    not gate every single login. The first verification must flip
+    two_factor_enabled off so later logins skip straight through.
+    """
+    register(client, "alice", "alice@example.com")
+
+    first = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+    assert first.json()["require_2fa"] is True
+    login(client, "alice")  # completes the one required verification
+
+    client.cookies.clear()
+    second = client.post("/api/auth/login", json={"username": "alice", "password": "password123"})
+    assert second.status_code == 200
+    assert second.json()["require_2fa"] is False
+    # No verify-2fa call needed this time - the session is already live.
+    assert client.get("/api/auth/me").status_code == 200
+
+
 def test_login_rejects_wrong_password_with_no_plaintext_fallback(client):
     register(client, "alice", "alice@example.com")
     response = client.post("/api/auth/login", json={"username": "alice", "password": "wrong-password"})

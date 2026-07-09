@@ -19,12 +19,24 @@ def register(client, username, email, password="password123"):
 
 
 def login(client, username, password="password123"):
+    """Log in, completing the 2FA step only if the account still requires
+    it. 2FA turns itself off after its first successful verification (see
+    routers/auth.py::verify_two_factor), so a second login for the same
+    username - common across tests - won't require it again.
+    """
     from app.database import SessionLocal
     from app.models import TwoFactorCode, User
 
     client.cookies.clear()
     response = client.post("/api/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text
+
+    if not response.json()["require_2fa"]:
+        db = SessionLocal()
+        try:
+            return db.query(User).filter(User.username == username).first().id
+        finally:
+            db.close()
 
     db = SessionLocal()
     try:

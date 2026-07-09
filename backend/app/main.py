@@ -59,6 +59,7 @@ app.add_middleware(
     secret_key=settings.secret_key,
     same_site="lax",
     https_only=settings.session_cookie_secure,
+    max_age=settings.session_max_age_days * 24 * 60 * 60,
 )
 
 # Everything lives under /api so it can never collide with a frontend

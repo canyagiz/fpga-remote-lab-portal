@@ -23,6 +23,10 @@ review:
 - **Identity is resolved from a server-side session cookie**
   (`app/deps.py::get_current_user`), never from a client-supplied `userId`
   field. Every admin-only and per-user endpoint checks this server-side.
+  The cookie itself is long-lived (`SESSION_MAX_AGE_DAYS`, default 30) and
+  re-signed on every response, so it's a sliding window like most modern
+  sites: staying active keeps you signed in, ~30 days of inactivity signs
+  you out.
 - **Queue position is recomputed on every state change** that removes a
   reservation from the `pending` set (cancel, complete, expire, or promotion
   to `active`) - see `app/services/queue.py::renumber_queue`. The old repo
@@ -82,7 +86,7 @@ of the same name once the SPA is served from the same origin (e.g.
 | `/api/auth/csrf-token` | GET | CSRF token, stored in session |
 | `/api/auth/register` | POST | Honeypot + CSRF + captcha + IP rate limit |
 | `/api/auth/login` | POST | Starts 2FA if enabled, sets `pending_2fa_user_id` in session |
-| `/api/auth/verify-2fa` | POST | Reads pending user id from session, not the request body |
+| `/api/auth/verify-2fa` | POST | Reads pending user id from session, not the request body. First success turns `two_factor_enabled` off, so it's a one-time email confirmation, not a per-login gate |
 | `/api/auth/resend-2fa` | POST | Same - session-scoped, can't be used to spam another account |
 | `/api/auth/logout` | POST | Clears the session |
 | `/api/auth/me` | GET | Current user, resolved from session |
