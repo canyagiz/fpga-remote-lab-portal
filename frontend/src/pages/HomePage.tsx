@@ -33,7 +33,9 @@ export default function HomePage() {
 
         <div className="mt-16 flex items-center justify-center gap-5">
           <span className="text-base uppercase tracking-wide text-muted-foreground">In partnership with</span>
-          <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-20 w-auto" />
+          <a href="https://www.h-brs.de/de" target="_blank" rel="noopener noreferrer">
+            <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-20 w-auto" />
+          </a>
         </div>
       </section>
 
