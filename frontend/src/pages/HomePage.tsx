@@ -9,7 +9,7 @@ export default function HomePage() {
   return (
     <div className="mx-auto max-w-5xl px-6">
       <section className="py-16 text-center sm:py-24">
-        <img src="/logo.png" alt="FPGA Vision" className="mx-auto mb-4 h-48 w-auto sm:h-56" />
+        <img src="/logo.png" alt="FPGA Vision" className="mx-auto mb-4 h-72 w-auto sm:h-80" />
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">FPGA Remote Lab</h1>
         <p className="mx-auto mt-3 max-w-md text-muted-foreground">
           Reserve real FPGA hardware and run your experiments remotely - no need to be on campus.
@@ -31,9 +31,9 @@ export default function HomePage() {
           )}
         </div>
 
-        <div className="mt-14 flex items-center justify-center gap-4">
-          <span className="text-sm uppercase tracking-wide text-muted-foreground">In partnership with</span>
-          <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-14 w-auto" />
+        <div className="mt-16 flex items-center justify-center gap-5">
+          <span className="text-base uppercase tracking-wide text-muted-foreground">In partnership with</span>
+          <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-20 w-auto" />
         </div>
       </section>
 
