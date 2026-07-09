@@ -20,7 +20,15 @@ export default function AuthDialog() {
             onSwitchToRegister={openRegister}
           />
         )}
-        {mode === "register" && <RegisterForm onSwitchToLogin={openLogin} />}
+        {mode === "register" && (
+          <RegisterForm
+            onSwitchToLogin={openLogin}
+            onSuccess={() => {
+              close();
+              navigate("/");
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

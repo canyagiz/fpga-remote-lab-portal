@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,9 +12,13 @@ interface RegisterFormProps {
   /** When provided (e.g. inside a modal), switches modes in place instead
    * of navigating to a separate /login page. */
   onSwitchToLogin?: () => void;
+  /** Called right after a successful registration instead of showing an
+   * intermediate "registration successful" screen - e.g. closes the modal. */
+  onSuccess?: () => void;
 }
 
-export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
+export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFormProps) {
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,8 +30,23 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
   const [website, setWebsite] = useState("");
 
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+
+  useEffect(() => {
+    if (!success) return;
+    if (countdown <= 0) {
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        navigate("/");
+      }
+      return;
+    }
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [success, countdown, onSuccess, navigate]);
 
   async function loadCaptchaAndCsrf() {
     // Sequential on purpose: both endpoints mutate the session cookie
@@ -89,17 +108,7 @@ export default function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         </CardHeader>
         <CardContent className="p-0">
           <p className="text-sm text-muted-foreground">
-            You can now{" "}
-            {onSwitchToLogin ? (
-              <button type="button" onClick={onSwitchToLogin} className="font-medium text-primary hover:underline">
-                sign in
-              </button>
-            ) : (
-              <Link to="/login" className="font-medium text-primary hover:underline">
-                sign in
-              </Link>
-            )}
-            .
+            Redirecting to the main menu in {countdown}...
           </p>
         </CardContent>
       </>
