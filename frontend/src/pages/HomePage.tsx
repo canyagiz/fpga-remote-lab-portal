@@ -30,6 +30,11 @@ export default function HomePage() {
             </>
           )}
         </div>
+
+        <div className="mt-14 flex items-center justify-center gap-3">
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">In partnership with</span>
+          <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-8 w-auto" />
+        </div>
       </section>
 
       {/* Placeholder content - to be replaced once the hardware-access

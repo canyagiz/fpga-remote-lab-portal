@@ -13,9 +13,11 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-7 py-3.5">
-      <Link to="/" className="flex items-center gap-2 font-bold tracking-tight text-foreground">
-        <img src="/logo.png" alt="" className="h-7 w-auto" />
-        FPGA Remote Lab
+      <Link to="/" className="flex items-center gap-3 font-bold tracking-tight text-foreground">
+        <img src="/logo.png" alt="" className="h-8 w-auto" />
+        <span>FPGA Remote Lab</span>
+        <span className="h-6 w-px bg-border" />
+        <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-6 w-auto" />
       </Link>
       <div className="flex items-center gap-5 text-sm">
         {user ? (
