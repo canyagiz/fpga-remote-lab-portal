@@ -1,9 +1,18 @@
 # FPGA Remote Lab - Frontend
 
-React + TypeScript + Vite. Covers the same scope as the backend right now:
+React + TypeScript + Vite, styled with **Tailwind CSS v4 + shadcn/ui**.
+Covers the same scope as the backend right now: a public landing page,
 login/register with email 2FA, the reservation/queue dashboard, the lab
 list, and an admin users page. No hardware-session UI yet (see the backend
 README's "deliberately deferred" list).
+
+shadcn/ui components live in `src/components/ui/` and are plain source
+files you own (not an npm dependency) - the usual `npx shadcn@latest add
+<component>` CLI needs an interactive terminal, which isn't available on
+CT210, so new components are currently added by hand, copying the
+upstream source from https://ui.shadcn.com/docs/components and adjusting
+imports to this project's `cn()` helper (`src/lib/utils.ts`) and color
+tokens (`src/styles.css`).
 
 ## Setup
 
@@ -33,10 +42,12 @@ just rebuild and restart the backend service.
 
 ```
 src/
-  api/          typed fetch client + response types, mirrors backend/app/schemas.py
-  context/      AuthContext - current user, login/2FA/logout
-  components/   Navbar, ProtectedRoute (route guard - UI only, not a security boundary)
-  pages/        one file per route
+  api/            typed fetch client + response types, mirrors backend/app/schemas.py
+  context/        AuthContext - current user, login/2FA/logout
+  components/ui/  shadcn/ui primitives (button, input, card, badge, table, label)
+  components/     Navbar, PasswordInput, PasswordStrength, ProtectedRoute (UI only, not a security boundary)
+  pages/          one file per route
+  lib/utils.ts    cn() class-merging helper shadcn components expect
 ```
 
 Route-level auth is enforced by `ProtectedRoute`, but that's purely for

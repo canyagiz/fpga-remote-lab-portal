@@ -1,31 +1,32 @@
 import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "../context/AuthContext";
 
 export default function HomePage() {
   const { user } = useAuth();
 
   return (
-    <div className="home">
-      <section className="hero">
-        <img src="/logo.png" alt="FPGA Vision" className="hero-logo" />
-        <h1>FPGA Remote Lab</h1>
-        <p className="hero-tagline">
-          Reserve real FPGA hardware and run your experiments remotely - no need to be on
-          campus.
+    <div className="mx-auto max-w-5xl px-6">
+      <section className="py-16 text-center sm:py-24">
+        <img src="/logo.png" alt="FPGA Vision" className="mx-auto mb-4 h-28 w-auto" />
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">FPGA Remote Lab</h1>
+        <p className="mx-auto mt-3 max-w-md text-muted-foreground">
+          Reserve real FPGA hardware and run your experiments remotely - no need to be on campus.
         </p>
-        <div className="hero-actions">
+        <div className="mt-8 flex justify-center gap-3">
           {user ? (
-            <Link to="/dashboard" className="btn-primary">
-              Go to dashboard
-            </Link>
+            <Button asChild size="lg">
+              <Link to="/dashboard">Go to dashboard</Link>
+            </Button>
           ) : (
             <>
-              <Link to="/register" className="btn-primary">
-                Get started
-              </Link>
-              <Link to="/login" className="btn-secondary">
-                Sign in
-              </Link>
+              <Button asChild size="lg">
+                <Link to="/register">Get started</Link>
+              </Button>
+              <Button asChild size="lg" variant="secondary">
+                <Link to="/login">Sign in</Link>
+              </Button>
             </>
           )}
         </div>
@@ -33,19 +34,37 @@ export default function HomePage() {
 
       {/* Placeholder content - to be replaced once the hardware-access
           layer and lab catalog (Faz 4/5) land. */}
-      <section className="feature-grid">
-        <div className="feature-card">
-          <h3>Reserve a slot</h3>
-          <p>Book a lab for a specific time, or join the queue for immediate access.</p>
-        </div>
-        <div className="feature-card">
-          <h3>Work from anywhere</h3>
-          <p>Access lab hardware from your browser - on campus or off.</p>
-        </div>
-        <div className="feature-card">
-          <h3>Secure by default</h3>
-          <p>Email verification on signup and session-based authentication protect every account.</p>
-        </div>
+      <section className="grid gap-5 pb-16 sm:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Reserve a slot</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Book a lab for a specific time, or join the queue for immediate access.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Work from anywhere</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Access lab hardware from your browser - on campus or off.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Secure by default</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Email verification on signup and session-based authentication protect every account.
+            </p>
+          </CardContent>
+        </Card>
       </section>
     </div>
   );

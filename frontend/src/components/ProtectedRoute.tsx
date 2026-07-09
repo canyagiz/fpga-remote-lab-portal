@@ -15,7 +15,7 @@ export default function ProtectedRoute({
 }) {
   const { user, loading } = useAuth();
 
-  if (loading) return <p className="hint">Loading...</p>;
+  if (loading) return <p className="p-6 text-sm text-muted-foreground">Loading...</p>;
   if (!user) return <Navigate to="/login" replace />;
   if (adminOnly && user.role !== "admin") return <Navigate to="/dashboard" replace />;
 

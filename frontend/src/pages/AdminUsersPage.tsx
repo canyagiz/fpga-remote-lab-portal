@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import * as api from "../api/client";
 import { User } from "../api/types";
 import { useAuth } from "../context/AuthContext";
@@ -37,39 +40,44 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="page">
-      <h1>Users</h1>
-      {error && <p className="error">{error}</p>}
-      <table className="user-table">
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Email</th>
-            <th>Role</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id}>
-              <td>{u.username}</td>
-              <td>{u.email}</td>
-              <td>{u.role}</td>
-              <td>
-                {u.id !== currentUser?.id && (
-                  <button
-                    className="secondary"
-                    disabled={busyId === u.id}
-                    onClick={() => handleDelete(u.id, u.username)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="mx-auto max-w-3xl px-6 py-10">
+      <h1 className="text-2xl font-bold tracking-tight">Users</h1>
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <div className="mt-6">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Username</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell className="font-medium">{u.username}</TableCell>
+                <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                <TableCell>
+                  <Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role}</Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  {u.id !== currentUser?.id && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busyId === u.id}
+                      onClick={() => handleDelete(u.id, u.username)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

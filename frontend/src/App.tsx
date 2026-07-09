@@ -12,7 +12,7 @@ import RegisterPage from "./pages/RegisterPage";
 export default function App() {
   const { user, loading } = useAuth();
 
-  if (loading) return <p className="hint">Loading...</p>;
+  if (loading) return <p className="p-6 text-sm text-muted-foreground">Loading...</p>;
 
   return (
     <>

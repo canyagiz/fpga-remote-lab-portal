@@ -1,5 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ApiError, getCaptcha, getCsrfToken, register } from "../api/client";
 import PasswordInput from "../components/PasswordInput";
 import PasswordStrength from "../components/PasswordStrength";
@@ -73,87 +77,112 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="auth-shell">
-        <div className="auth-card">
-          <h1>Registration successful</h1>
-          <p className="hint">
-            You can now <Link to="/login">sign in</Link>.
-          </p>
-        </div>
+      <div className="flex min-h-[calc(100vh-61px)] items-center justify-center px-6 py-8">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle className="text-2xl">Registration successful</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              You can now{" "}
+              <Link to="/login" className="font-medium text-primary hover:underline">
+                sign in
+              </Link>
+              .
+            </p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card">
-      <h1>Register</h1>
-      <form onSubmit={handleSubmit}>
-        <label htmlFor="username">Username</label>
-        <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+    <div className="flex min-h-[calc(100vh-61px)] items-center justify-center px-6 py-8">
+      <Card className="w-full max-w-sm">
+        <CardHeader>
+          <CardTitle className="text-2xl">Register</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="username">Username</Label>
+              <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            </div>
 
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-        <label htmlFor="password">Password</label>
-        <PasswordInput
-          id="password"
-          value={password}
-          onChange={setPassword}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-        <PasswordStrength password={password} />
+            <div className="space-y-1.5">
+              <Label htmlFor="password">Password</Label>
+              <PasswordInput
+                id="password"
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+              <PasswordStrength password={password} />
+            </div>
 
-        <label htmlFor="confirmPassword">Confirm password</label>
-        <PasswordInput
-          id="confirmPassword"
-          value={confirmPassword}
-          onChange={setConfirmPassword}
-          autoComplete="new-password"
-          required
-        />
-        {confirmPassword && password !== confirmPassword && (
-          <p className="error">Passwords don't match</p>
-        )}
+            <div className="space-y-1.5">
+              <Label htmlFor="confirmPassword">Confirm password</Label>
+              <PasswordInput
+                id="confirmPassword"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                autoComplete="new-password"
+                required
+              />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-sm text-destructive">Passwords don't match</p>
+              )}
+            </div>
 
-        <label htmlFor="captcha">Security check: {captchaQuestion}</label>
-        <input
-          id="captcha"
-          type="number"
-          value={captchaAnswer}
-          onChange={(e) => setCaptchaAnswer(e.target.value)}
-          required
-        />
+            <div className="space-y-1.5">
+              <Label htmlFor="captcha">Security check: {captchaQuestion}</Label>
+              <Input
+                id="captcha"
+                type="number"
+                value={captchaAnswer}
+                onChange={(e) => setCaptchaAnswer(e.target.value)}
+                required
+              />
+            </div>
 
-        {/* Honeypot: hidden from sighted users via CSS, real bots fill it in. */}
-        <div className="honeypot" aria-hidden="true">
-          <label htmlFor="website">Website</label>
-          <input
-            id="website"
-            tabIndex={-1}
-            autoComplete="off"
-            value={website}
-            onChange={(e) => setWebsite(e.target.value)}
-          />
-        </div>
+            {/* Honeypot: hidden from sighted users, real bots fill it in. */}
+            <div className="absolute -left-[9999px]" aria-hidden="true">
+              <Label htmlFor="website">Website</Label>
+              <Input
+                id="website"
+                tabIndex={-1}
+                autoComplete="off"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+              />
+            </div>
 
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={submitting}>
-          Register
-        </button>
-      </form>
-      <p className="hint auth-switch">
-        Already have an account? <Link to="/login">Sign in</Link>
-      </p>
-      </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" className="w-full" disabled={submitting}>
+              Register
+            </Button>
+          </form>
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Already have an account?{" "}
+            <Link to="/login" className="font-medium text-primary hover:underline">
+              Sign in
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
