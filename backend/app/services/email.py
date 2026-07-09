@@ -21,13 +21,19 @@ def send_two_factor_code(to_email: str, username: str, code: str) -> bool:
     message["From"] = f"{settings.mail_from_name} <{settings.mail_from_email}>"
     message["To"] = to_email
 
-    text_body = f"Hi {username},\n\nYour verification code is: {code}\nIt expires in 1 minute."
+    # Derived from the actual TTL setting so this text can't drift out of
+    # sync with the real expiry again (it previously said "1 minute" no
+    # matter what the configured TTL was).
+    expiry_minutes = settings.two_factor_code_ttl_seconds / 60
+    expiry_text = f"{expiry_minutes:g} minute{'s' if expiry_minutes != 1 else ''}"
+
+    text_body = f"Hi {username},\n\nYour verification code is: {code}\nIt expires in {expiry_text}."
     html_body = f"""
     <html><body>
       <p>Hi <strong>{username}</strong>,</p>
       <p>Your verification code is:</p>
       <h2>{code}</h2>
-      <p>It expires in 1 minute.</p>
+      <p>It expires in {expiry_text}.</p>
     </body></html>
     """
     message.attach(MIMEText(text_body, "plain"))

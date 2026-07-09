@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     min_reservation_advance_minutes: int = 5
     expiry_sweep_interval_seconds: int = 60
 
-    two_factor_code_ttl_seconds: int = 60
+    # 1 minute (the old repo's value) is too tight in practice - it barely
+    # survives the time it takes to switch to a mail client and back, let
+    # alone the current Mailpit lookup workflow before real SMTP is wired
+    # up. 5 minutes is a more realistic window.
+    two_factor_code_ttl_seconds: int = 300
     registration_rate_limit_window_minutes: int = 15
     registration_rate_limit_max_attempts: int = 5
 
