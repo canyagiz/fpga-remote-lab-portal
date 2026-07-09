@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import HeroVideo from "../components/HeroVideo";
 import { useAuth } from "../context/AuthContext";
 
 export default function HomePage() {
@@ -9,7 +10,7 @@ export default function HomePage() {
   return (
     <div className="mx-auto max-w-5xl px-6">
       <section className="py-16 text-center sm:py-24">
-        <img src="/logo.png" alt="FPGA Vision" className="mx-auto mb-4 h-72 w-auto sm:h-80" />
+        <HeroVideo />
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">FPGA Remote Lab</h1>
         <p className="mx-auto mt-3 max-w-md text-muted-foreground">
           Reserve real FPGA hardware and run your experiments remotely - no need to be on campus.
