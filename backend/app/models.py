@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime, time
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, String, Text, Time
+from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -50,6 +50,14 @@ class Lab(Base):
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[LabStatus] = mapped_column(Enum(LabStatus), default=LabStatus.available)
+    image_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Direct CT300 hardware endpoint (host:port). Only ever handed to a
+    # client that holds an active reservation for this lab - see
+    # routers/labs.py::access_lab.
+    backend_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    keywords: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    features: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
     reservations: Mapped[list["Reservation"]] = relationship(back_populates="lab")
 

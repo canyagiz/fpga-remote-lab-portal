@@ -33,6 +33,14 @@ export interface Lab {
   description: string | null;
   status: LabStatus;
   queue_count: number;
+  image_url: string | null;
+  keywords: string[] | null;
+  features: string[] | null;
+  is_public: boolean;
+}
+
+export interface LabAccess {
+  backend_url: string;
 }
 
 export type ReservationStatus = "pending" | "active" | "completed" | "cancelled" | "expired";

@@ -29,11 +29,56 @@ async def _expiry_sweep_loop():
             db.close()
 
 
-def _seed_demo_lab():
+# Metadata mirrors CT200's laboratories.yml/resources.yml (the LabDiscoveryEngine
+# portal this replaces). backend_url points directly at the CT300 hardware
+# containers (network_mode: host, one per board) instead of through CT200's
+# proxy path. Only Arty Z7 is public for now, matching CT200's current
+# live behavior where the other three boards aren't yet exposed.
+_REAL_LABS = [
+    dict(
+        name="Cyclone 10 Lab",
+        description="Access an FPGA board with a Cyclone 10 FPGA for image processing",
+        image_url="/labs/EduPow_CX.jpg",
+        backend_url="http://10.30.70.23:5000",
+        keywords=["fpga", "electronics", "image processing", "cyclone10"],
+        features=["feature1", "feature2"],
+        is_public=False,
+    ),
+    dict(
+        name="Cyclone IV Lab",
+        description="Access an FPGA board with a Cyclone IV FPGA for image processing",
+        image_url="/labs/EduPow_CIV.jpg",
+        backend_url="http://10.30.70.23:5001",
+        keywords=["fpga", "electronics", "image processing", "cyclone4"],
+        features=["feature1", "feature2"],
+        is_public=False,
+    ),
+    dict(
+        name="Cyclone V Lab",
+        description="Access an FPGA board with a Cyclone V FPGA for image processing",
+        image_url="/labs/EduPow_CV.jpg",
+        backend_url="http://10.30.70.23:5002",
+        keywords=["fpga", "electronics", "image processing", "cyclone5"],
+        features=["feature1", "feature2"],
+        is_public=False,
+    ),
+    dict(
+        name="Arty Z7 Lab",
+        description="Access an FPGA board with a Xilinx Zynq-7020 FPGA for image processing",
+        image_url="/labs/EduPow_Z7.png",
+        backend_url="http://10.30.70.23:5003",
+        keywords=["fpga", "electronics", "image processing", "xilinx", "zynq"],
+        features=["feature1", "feature2"],
+        is_public=True,
+    ),
+]
+
+
+def _seed_labs():
     db = SessionLocal()
     try:
         if db.query(Lab).count() == 0:
-            db.add(Lab(name="Demo Lab", description="Placeholder lab for testing auth and queue flows."))
+            db.add_all(Lab(**lab_kwargs) for lab_kwargs in _REAL_LABS)
             db.commit()
     finally:
         db.close()
@@ -42,7 +87,7 @@ def _seed_demo_lab():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    _seed_demo_lab()
+    _seed_labs()
     sweep_task = asyncio.create_task(_expiry_sweep_loop())
     yield
     sweep_task.cancel()

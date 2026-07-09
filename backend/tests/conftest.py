@@ -8,9 +8,10 @@ from app.main import app
 def client():
     """Fresh, empty database for every test.
 
-    The app's lifespan handler re-creates tables and seeds the demo lab on
-    each TestClient startup, so dropping everything first guarantees each
-    test starts from a clean slate regardless of test order.
+    The app's lifespan handler re-creates tables and seeds the real lab
+    catalog (see app/main.py::_seed_labs) on each TestClient startup, so
+    dropping everything first guarantees each test starts from a clean
+    slate regardless of test order.
     """
     Base.metadata.drop_all(bind=engine)
 

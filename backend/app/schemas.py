@@ -55,6 +55,10 @@ class LabOut(BaseModel):
     description: str | None
     status: LabStatus
     queue_count: int
+    image_url: str | None
+    keywords: list[str] | None
+    features: list[str] | None
+    is_public: bool
 
     model_config = {"from_attributes": True}
 
@@ -62,6 +66,15 @@ class LabOut(BaseModel):
 class LabCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(min_length=1)
+    image_url: str | None = None
+    backend_url: str | None = None
+    keywords: list[str] | None = None
+    features: list[str] | None = None
+    is_public: bool = False
+
+
+class LabAccessOut(BaseModel):
+    backend_url: str
 
 
 class ReservationCreate(BaseModel):
