@@ -3,11 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import HeroVideo from "../components/HeroVideo";
 import { useAuth } from "../context/AuthContext";
-import { useAuthDialog } from "../context/AuthDialogContext";
 
 export default function HomePage() {
   const { user } = useAuth();
-  const { openLogin, openRegister } = useAuthDialog();
 
   return (
     <div className="mx-auto max-w-5xl px-6">
@@ -17,22 +15,13 @@ export default function HomePage() {
         <p className="mx-auto mt-3 max-w-md text-muted-foreground">
           Reserve real FPGA hardware and run your experiments remotely - no need to be on campus.
         </p>
-        <div className="mt-8 flex justify-center gap-3">
-          {user ? (
+        {user && (
+          <div className="mt-8 flex justify-center gap-3">
             <Button asChild size="lg">
               <Link to="/dashboard">Go to dashboard</Link>
             </Button>
-          ) : (
-            <>
-              <Button size="lg" onClick={openRegister}>
-                Get started
-              </Button>
-              <Button size="lg" variant="secondary" onClick={openLogin}>
-                Sign in
-              </Button>
-            </>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="mt-16 flex items-center justify-center gap-5">
           <span className="text-base uppercase tracking-wide text-muted-foreground">In partnership with</span>
