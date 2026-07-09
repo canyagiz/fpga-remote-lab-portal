@@ -1,117 +1,390 @@
+/* ============================================================
+   Design tokens
+   ============================================================ */
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Force light only: the page is only styled for light mode, and
+     `light dark` was letting browsers render native form controls
+     (inputs, buttons) in dark UA styling on top of a light-only custom
+     UI - the exact "half-themed" mismatch that made this look broken. */
+  color-scheme: light;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Brand */
+  --color-primary: #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-primary-active: #3730a3;
+  --color-primary-soft: #eef2ff;
+  --color-primary-soft-text: #4338ca;
+
+  /* Neutrals (slate) */
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-text-faint: #94a3b8;
+
+  /* Semantic */
+  --color-success: #16a34a;
+  --color-success-soft: #dcfce7;
+  --color-success-soft-text: #166534;
+  --color-warning: #d97706;
+  --color-warning-soft: #fef3c7;
+  --color-warning-soft-text: #92400e;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fee2e2;
+  --color-danger-soft-text: #991b1b;
+  --color-neutral-soft: #f1f5f9;
+  --color-neutral-soft-text: #475569;
+
+  /* Scale */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  --shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.18);
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: #f5f7fa;
-  color: #1a202c;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  font-size: 1.75rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin-top: 2rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+/* ============================================================
+   Navbar
+   ============================================================ */
 .navbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 1.5rem;
-  background: #1a202c;
-  color: white;
+  padding: 0.9rem 1.75rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .nav-brand {
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-brand::before {
+  content: "◆";
+  color: var(--color-primary);
+  font-size: 0.9rem;
 }
 
 .nav-links {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 1.5rem;
+  font-size: 0.9rem;
 }
 
 .nav-links a {
-  color: white;
+  color: var(--color-text-muted);
   text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
 }
 
 .nav-links a:hover {
-  text-decoration: underline;
+  color: var(--color-text);
 }
 
 .nav-user {
-  opacity: 0.8;
+  color: var(--color-text-faint);
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--color-border);
 }
 
-.page,
+/* ============================================================
+   Layout
+   ============================================================ */
+.page {
+  max-width: 720px;
+  margin: 2.5rem auto;
+  padding: 0 1.5rem;
+}
+
+.auth-shell {
+  min-height: calc(100vh - 61px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+}
+
 .auth-card {
-  max-width: 640px;
-  margin: 2rem auto;
-  padding: 1.5rem;
+  width: 100%;
+  max-width: 400px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: 2rem;
 }
 
-.auth-card {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+.auth-card h1 {
+  margin-bottom: 1.5rem;
 }
 
+.auth-switch {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+.code-input {
+  font-size: 1.75rem;
+  letter-spacing: 0.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding-left: 0.9rem;
+}
+
+/* ============================================================
+   Forms
+   ============================================================ */
 form {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
 }
 
 label {
   font-size: 0.85rem;
   font-weight: 600;
-  margin-top: 0.5rem;
+  color: var(--color-text);
+  margin-top: 0.75rem;
 }
 
 input,
 textarea {
-  padding: 0.5rem;
-  border: 1px solid #cbd5e0;
-  border-radius: 4px;
-  font-size: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-faint);
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-focus);
+}
+
+textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
 button {
-  margin-top: 1rem;
-  padding: 0.55rem 1.1rem;
+  margin-top: 1.25rem;
+  padding: 0.6rem 1.15rem;
   border: none;
-  border-radius: 4px;
-  background: #2c5282;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
   color: white;
+  font-family: inherit;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+button:active:not(:disabled) {
+  background: var(--color-primary-active);
+  transform: translateY(1px);
 }
 
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: default;
 }
 
 button.secondary {
-  background: #e2e8f0;
-  color: #1a202c;
+  background: var(--color-neutral-soft);
+  color: var(--color-text);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--color-border);
 }
 
 button.link-button {
   background: none;
-  color: #2c5282;
+  color: var(--color-primary);
   padding: 0;
-  margin-top: 0.5rem;
+  margin-top: 0.6rem;
+  font-weight: 500;
   text-decoration: underline;
-  font-weight: normal;
+  text-underline-offset: 2px;
 }
 
+button.link-button:hover {
+  background: none;
+  color: var(--color-primary-hover);
+}
+
+/* ============================================================
+   Password input
+   ============================================================ */
+.password-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.password-input-row input {
+  flex: 1;
+}
+
+.password-toggle {
+  margin-top: 0;
+  background: var(--color-neutral-soft);
+  color: var(--color-text-muted);
+  padding: 0 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.password-toggle:hover:not(:disabled) {
+  background: var(--color-border);
+}
+
+.caps-lock-warning {
+  color: var(--color-warning-soft-text);
+  background: var(--color-warning-soft);
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin: 0.4rem 0 0;
+}
+
+/* ============================================================
+   Password strength
+   ============================================================ */
+.password-strength {
+  margin-top: 0.5rem;
+}
+
+.strength-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.strength-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease, background 0.2s ease;
+}
+
+.strength-bar-fill.strength-0,
+.strength-bar-fill.strength-1 {
+  background: var(--color-danger);
+}
+
+.strength-bar-fill.strength-2,
+.strength-bar-fill.strength-3 {
+  background: var(--color-warning);
+}
+
+.strength-bar-fill.strength-4,
+.strength-bar-fill.strength-5 {
+  background: var(--color-success);
+}
+
+.strength-checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem 1rem;
+  font-size: 0.8rem;
+  color: var(--color-text-faint);
+}
+
+.strength-checklist li.met {
+  color: var(--color-success);
+  font-weight: 500;
+}
+
+/* ============================================================
+   Feedback text
+   ============================================================ */
 .error {
-  color: #c53030;
-  font-size: 0.9rem;
+  color: var(--color-danger);
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
 }
 
 .hint {
-  color: #718096;
-  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
 }
 
 .honeypot {
@@ -119,58 +392,87 @@ button.link-button {
   left: -9999px;
 }
 
+/* ============================================================
+   Badges
+   ============================================================ */
 .badge {
-  display: inline-block;
-  padding: 0.1rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  margin-left: 0.5rem;
+  text-transform: capitalize;
+  margin-left: 0.6rem;
 }
 
 .badge-available,
 .badge-active {
-  background: #c6f6d5;
-  color: #22543d;
+  background: var(--color-success-soft);
+  color: var(--color-success-soft-text);
 }
 
 .badge-occupied,
 .badge-pending {
-  background: #feebc8;
-  color: #7b341e;
+  background: var(--color-warning-soft);
+  color: var(--color-warning-soft-text);
 }
 
 .badge-cancelled,
 .badge-expired,
 .badge-completed {
-  background: #e2e8f0;
-  color: #4a5568;
+  background: var(--color-neutral-soft);
+  color: var(--color-neutral-soft-text);
 }
 
+/* ============================================================
+   Cards: labs & reservations
+   ============================================================ */
 .lab-list,
 .reservation-list {
   list-style: none;
   padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
 }
 
 .lab-card,
 .reservation-item {
-  background: white;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.lab-card h3 {
+  margin-bottom: 0.25rem;
+}
+
+.lab-card p {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
 }
 
 .reservation-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
 }
 
 .actions {
   display: flex;
   gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.reservation-item .actions {
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .actions button {
@@ -180,100 +482,52 @@ button.link-button {
 .inline-form {
   flex-direction: row;
   align-items: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--color-border);
 }
 
 .inline-form label {
   margin-top: 0;
 }
 
+/* ============================================================
+   Admin
+   ============================================================ */
 .admin-panel {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid #cbd5e0;
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-border);
 }
 
 .user-table {
   width: 100%;
   border-collapse: collapse;
-}
-
-.user-table th,
-.user-table td {
-  text-align: left;
-  padding: 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.password-input-row {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.password-input-row input {
-  flex: 1;
-}
-
-.password-toggle {
-  margin-top: 0;
-  background: #e2e8f0;
-  color: #1a202c;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.8rem;
-}
-
-.caps-lock-warning {
-  color: #b7791f;
-  font-size: 0.8rem;
-  margin: 0.25rem 0 0;
-}
-
-.password-strength {
-  margin-top: 0.35rem;
-}
-
-.strength-bar {
-  height: 6px;
-  border-radius: 999px;
-  background: #e2e8f0;
+  margin-top: 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
-.strength-bar-fill {
-  height: 100%;
-  transition: width 0.2s ease;
+.user-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-faint);
+  background: var(--color-neutral-soft);
+  padding: 0.65rem 1rem;
 }
 
-.strength-bar-fill.strength-0,
-.strength-bar-fill.strength-1 {
-  background: #c53030;
+.user-table td {
+  padding: 0.65rem 1rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.9rem;
 }
 
-.strength-bar-fill.strength-2,
-.strength-bar-fill.strength-3 {
-  background: #dd6b20;
-}
-
-.strength-bar-fill.strength-4 {
-  background: #38a169;
-}
-
-.strength-bar-fill.strength-5 {
-  background: #2f855a;
-}
-
-.strength-checklist {
-  list-style: none;
-  padding: 0;
-  margin: 0.35rem 0 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.15rem 1rem;
-  font-size: 0.8rem;
-  color: #718096;
-}
-
-.strength-checklist li.met {
-  color: #2f855a;
+.user-table td button {
+  margin-top: 0;
 }

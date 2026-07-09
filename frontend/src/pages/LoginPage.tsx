@@ -60,51 +60,56 @@ export default function LoginPage() {
 
   if (awaiting2FA) {
     return (
-      <div className="auth-card">
-        <h1>Verification code</h1>
-        <p>We sent a 6-digit code to your email.</p>
-        <form onSubmit={handleVerify}>
-          <label htmlFor="code">Code</label>
-          <input
-            id="code"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            maxLength={6}
-            inputMode="numeric"
-            autoFocus
-            required
-          />
-          {error && <p className="error">{error}</p>}
-          <button type="submit" disabled={submitting}>
-            Verify
+      <div className="auth-shell">
+        <div className="auth-card">
+          <h1>Verification code</h1>
+          <p className="hint">We sent a 6-digit code to your email.</p>
+          <form onSubmit={handleVerify}>
+            <label htmlFor="code">Code</label>
+            <input
+              id="code"
+              className="code-input"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              maxLength={6}
+              inputMode="numeric"
+              autoFocus
+              required
+            />
+            {error && <p className="error">{error}</p>}
+            <button type="submit" disabled={submitting}>
+              Verify
+            </button>
+          </form>
+          <button className="link-button" onClick={handleResend}>
+            Resend code
           </button>
-        </form>
-        <button className="link-button" onClick={handleResend}>
-          Resend code
-        </button>
-        {resendMessage && <p className="hint">{resendMessage}</p>}
+          {resendMessage && <p className="hint">{resendMessage}</p>}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="auth-card">
-      <h1>Sign in</h1>
-      <form onSubmit={handleLogin}>
-        <label htmlFor="username">Username</label>
-        <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+    <div className="auth-shell">
+      <div className="auth-card">
+        <h1>Sign in</h1>
+        <form onSubmit={handleLogin}>
+          <label htmlFor="username">Username</label>
+          <input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
 
-        <label htmlFor="password">Password</label>
-        <PasswordInput id="password" value={password} onChange={setPassword} autoComplete="current-password" required />
+          <label htmlFor="password">Password</label>
+          <PasswordInput id="password" value={password} onChange={setPassword} autoComplete="current-password" required />
 
-        {error && <p className="error">{error}</p>}
-        <button type="submit" disabled={submitting}>
-          Sign in
-        </button>
-      </form>
-      <p className="hint">
-        No account? <Link to="/register">Register</Link>
-      </p>
+          {error && <p className="error">{error}</p>}
+          <button type="submit" disabled={submitting}>
+            Sign in
+          </button>
+        </form>
+        <p className="hint auth-switch">
+          No account? <Link to="/register">Register</Link>
+        </p>
+      </div>
     </div>
   );
 }

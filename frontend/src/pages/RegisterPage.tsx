@@ -73,17 +73,20 @@ export default function RegisterPage() {
 
   if (success) {
     return (
-      <div className="auth-card">
-        <h1>Registration successful</h1>
-        <p>
-          You can now <Link to="/login">sign in</Link>.
-        </p>
+      <div className="auth-shell">
+        <div className="auth-card">
+          <h1>Registration successful</h1>
+          <p className="hint">
+            You can now <Link to="/login">sign in</Link>.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="auth-card">
+    <div className="auth-shell">
+      <div className="auth-card">
       <h1>Register</h1>
       <form onSubmit={handleSubmit}>
         <label htmlFor="username">Username</label>
@@ -147,9 +150,10 @@ export default function RegisterPage() {
           Register
         </button>
       </form>
-      <p className="hint">
+      <p className="hint auth-switch">
         Already have an account? <Link to="/login">Sign in</Link>
       </p>
+      </div>
     </div>
   );
 }
