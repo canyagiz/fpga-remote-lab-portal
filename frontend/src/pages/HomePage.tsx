@@ -20,6 +20,9 @@ export default function HomePage() {
             <Button asChild size="lg">
               <Link to="/dashboard">Go to dashboard</Link>
             </Button>
+            <Button asChild size="lg" variant="secondary">
+              <Link to="/calendar">View calendar</Link>
+            </Button>
           </div>
         )}
 

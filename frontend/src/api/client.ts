@@ -1,10 +1,12 @@
 import {
   ApiError,
+  CalendarEntry,
   CaptchaResponse,
   Lab,
   LabAccess,
   LoginResult,
   MessageResponse,
+  Profile,
   Reservation,
   User,
 } from "./types";
@@ -39,6 +41,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 const get = <T>(path: string) => request<T>(path);
 const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body !== undefined ? JSON.stringify(body) : undefined });
+const put = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: "PUT", body: body !== undefined ? JSON.stringify(body) : undefined });
 const del = <T>(path: string) => request<T>(path, { method: "DELETE" });
 
 // --- auth ---
@@ -81,10 +85,16 @@ export const makeReservation = (labId: number, date: string, time: string) =>
     reservation_time: time,
   });
 
-export const joinQueue = (labId: number) => post<Reservation>("/api/reservations/queue", { lab_id: labId });
+export const accessNow = (labId: number) =>
+  post<Reservation>("/api/reservations/access-now", { lab_id: labId });
 export const cancelReservation = (id: number) => post<Reservation>(`/api/reservations/${id}/cancel`);
-export const startLabUsage = (id: number) => post<Reservation>(`/api/reservations/${id}/start`);
 export const completeLabUsage = (id: number) => post<Reservation>(`/api/reservations/${id}/complete`);
+export const getCalendar = () => get<CalendarEntry[]>("/api/reservations/calendar");
+
+// --- profile ---
+
+export const getMyProfile = () => get<Profile>("/api/profile");
+export const updateMyProfile = (data: Profile) => put<Profile>("/api/profile", data);
 
 // --- users (admin) ---
 

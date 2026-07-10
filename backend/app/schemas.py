@@ -49,6 +49,26 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProfileOut(BaseModel):
+    full_name: str | None
+    school: str | None
+    department: str | None
+    age: int | None
+    bio: str | None
+    social_links: dict[str, str] | None
+
+    model_config = {"from_attributes": True}
+
+
+class ProfileUpdate(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
+    school: str | None = Field(default=None, max_length=150)
+    department: str | None = Field(default=None, max_length=150)
+    age: int | None = Field(default=None, ge=0, le=150)
+    bio: str | None = Field(default=None, max_length=1000)
+    social_links: dict[str, str] | None = None
+
+
 class LabOut(BaseModel):
     id: int
     name: str
@@ -59,6 +79,10 @@ class LabOut(BaseModel):
     keywords: list[str] | None
     features: list[str] | None
     is_public: bool
+    # None means available right now; otherwise the earliest moment a new
+    # session could start without overlapping an existing reservation -
+    # see services/availability.py::next_available_at.
+    next_available_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -96,5 +120,22 @@ class ReservationOut(BaseModel):
     status: ReservationStatus
     queue_position: int
     created_at: datetime
+    # Only set once the session is actually running (status == active).
+    # session_ends_at lets the frontend count down and disable Finish /
+    # drop the card once the allotted time is up, without needing to know
+    # session_duration_seconds itself.
+    usage_start_time: datetime | None
+    session_ends_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class CalendarEntryOut(BaseModel):
+    lab_id: int
+    lab_name: str
+    # Deliberately just the username, not a full profile - see
+    # routers/reservations.py::calendar.
+    username: str
+    status: ReservationStatus
+    start_time: datetime
+    end_time: datetime

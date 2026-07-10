@@ -101,7 +101,7 @@ def test_cannot_delete_user_with_reservation_history(client):
 
     register(client, "bob", "bob@example.com")
     login(client, "bob")
-    reservation = client.post("/api/reservations/queue", json={"lab_id": lab_id}).json()
+    reservation = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
     assert reservation["status"] == "active"
 
     from app.database import SessionLocal

@@ -1,34 +1,30 @@
 import { FormEvent, useState } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import PasswordInput from "./PasswordInput";
 
 interface LoginFormProps {
   onSuccess: () => void;
-  /** When provided (e.g. inside a modal), switches modes in place instead
-   * of navigating to a separate /register page. */
-  onSwitchToRegister?: () => void;
+  onSwitchToRegister: () => void;
 }
 
 export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormProps) {
   const { login, verify2FA, resend2FA } = useAuth();
+  const { showError, showSuccess } = useToast();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [awaiting2FA, setAwaiting2FA] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
       const { requires2FA } = await login(username, password);
@@ -38,7 +34,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
         onSuccess();
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Login failed");
+      showError(err instanceof ApiError ? err.message : "Login failed");
     } finally {
       setSubmitting(false);
     }
@@ -46,25 +42,23 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
 
   async function handleVerify(e: FormEvent) {
     e.preventDefault();
-    setError(null);
     setSubmitting(true);
     try {
       await verify2FA(code);
       onSuccess();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Verification failed");
+      showError(err instanceof ApiError ? err.message : "Verification failed");
     } finally {
       setSubmitting(false);
     }
   }
 
   async function handleResend() {
-    setResendMessage(null);
     try {
       await resend2FA();
-      setResendMessage("A new code has been sent.");
+      showSuccess("A new code has been sent.");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to resend code");
+      showError(err instanceof ApiError ? err.message : "Failed to resend code");
     }
   }
 
@@ -90,7 +84,6 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
                 className="text-center text-2xl tracking-[0.5em]"
               />
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={submitting}>
               Verify
             </Button>
@@ -98,7 +91,6 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
           <Button variant="link" className="mt-3 h-auto p-0" onClick={handleResend}>
             Resend code
           </Button>
-          {resendMessage && <p className="mt-1 text-sm text-muted-foreground">{resendMessage}</p>}
         </CardContent>
       </>
     );
@@ -127,26 +119,15 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             />
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={submitting}>
             Sign in
           </Button>
         </form>
         <p className="mt-6 text-center text-sm text-muted-foreground">
           No account?{" "}
-          {onSwitchToRegister ? (
-            <button
-              type="button"
-              onClick={onSwitchToRegister}
-              className="font-medium text-primary hover:underline"
-            >
-              Register
-            </button>
-          ) : (
-            <Link to="/register" className="font-medium text-primary hover:underline">
-              Register
-            </Link>
-          )}
+          <button type="button" onClick={onSwitchToRegister} className="font-medium text-primary hover:underline">
+            Register
+          </button>
         </p>
       </CardContent>
     </>

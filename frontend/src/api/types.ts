@@ -37,6 +37,7 @@ export interface Lab {
   keywords: string[] | null;
   features: string[] | null;
   is_public: boolean;
+  next_available_at: string | null;
 }
 
 export interface LabAccess {
@@ -54,6 +55,26 @@ export interface Reservation {
   status: ReservationStatus;
   queue_position: number;
   created_at: string;
+  usage_start_time: string | null;
+  session_ends_at: string | null;
+}
+
+export interface Profile {
+  full_name: string | null;
+  school: string | null;
+  department: string | null;
+  age: number | null;
+  bio: string | null;
+  social_links: Record<string, string> | null;
+}
+
+export interface CalendarEntry {
+  lab_id: number;
+  lab_name: string;
+  username: string;
+  status: ReservationStatus;
+  start_time: string;
+  end_time: string;
 }
 
 export class ApiError extends Error {

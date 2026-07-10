@@ -11,8 +11,8 @@ from starlette.responses import FileResponse
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import Lab
-from app.routers import auth, labs, reservations, users
-from app.services.queue import sweep_expired_reservations
+from app.routers import auth, hardware_proxy, labs, profile, reservations, users
+from app.services.queue import sweep_expired_reservations, sweep_logged_out_sessions
 
 logger = logging.getLogger("fpga_remote_lab")
 
@@ -25,6 +25,10 @@ async def _expiry_sweep_loop():
             count = sweep_expired_reservations(db)
             if count:
                 logger.info("Expiry sweep: %d reservation(s) expired", count)
+            # A blocking HTTP call per open session - fine at this scale
+            # (a handful of boards), same tradeoff the DB-only sweep above
+            # already makes by running synchronously in this loop.
+            sweep_logged_out_sessions(db)
         finally:
             db.close()
 
@@ -114,6 +118,15 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(labs.router, prefix="/api")
 app.include_router(reservations.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(profile.router, prefix="/api")
+
+# Not under /api: nginx now reverse-proxies /hw/{lab_id}/* and
+# /labfiles/* straight to CT300 itself (see
+# /etc/nginx/sites-available/fgpa-remote-lab on CT210), except for this
+# one path - the in-lab "Log out" button needs our own database, so
+# nginx carves POST /hw/{lab_id}/logout out to us specifically. Still
+# registered before the SPA catch-all below so it takes precedence.
+app.include_router(hardware_proxy.router)
 
 
 @app.get("/health")

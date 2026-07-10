@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,12 +10,14 @@ from app.database import get_db
 from app.deps import get_current_user, require_admin
 from app.models import Lab, Reservation, ReservationStatus, User
 from app.schemas import LabAccessOut, LabCreate, LabOut
+from app.services.availability import next_available_at
 from app.services.weblab import WeblabSessionError, start_weblab_session
 
 router = APIRouter(prefix="/labs", tags=["labs"])
 
 
-def _to_out(lab: Lab, queue_count: int) -> LabOut:
+def _to_out(db: Session, lab: Lab, queue_count: int) -> LabOut:
+    available_at = next_available_at(db, lab.id)
     return LabOut(
         id=lab.id,
         name=lab.name,
@@ -26,6 +28,7 @@ def _to_out(lab: Lab, queue_count: int) -> LabOut:
         keywords=lab.keywords,
         features=lab.features,
         is_public=lab.is_public,
+        next_available_at=available_at.replace(tzinfo=timezone.utc) if available_at is not None else None,
     )
 
 
@@ -43,7 +46,7 @@ def list_labs(db: Session = Depends(get_db), _: User = Depends(get_current_user)
         .order_by(Lab.id)
     ).all()
 
-    return [_to_out(lab, queue_count or 0) for lab, queue_count in rows]
+    return [_to_out(db, lab, queue_count or 0) for lab, queue_count in rows]
 
 
 @router.post("", response_model=LabOut, status_code=201)
@@ -62,7 +65,7 @@ def create_lab(payload: LabCreate, db: Session = Depends(get_db), _: User = Depe
     db.add(lab)
     db.commit()
     db.refresh(lab)
-    return _to_out(lab, 0)
+    return _to_out(db, lab, 0)
 
 
 @router.get("/{lab_id}/access", response_model=LabAccessOut)
@@ -86,18 +89,40 @@ def access_lab(
             detail="You need an active reservation to access this lab",
         )
 
-    if reservation.usage_start_time is not None:
-        elapsed = (datetime.utcnow() - reservation.usage_start_time).total_seconds()
+    # Reuse the session started for this reservation if one already
+    # exists - each fresh call otherwise opens a brand-new WebLab session
+    # on the same physical board, so opening several tabs (or clicking
+    # Access more than once) would give each of them independent,
+    # simultaneous control over the same hardware.
+    if reservation.weblab_session_url is None:
+        if reservation.usage_start_time is not None:
+            elapsed = (datetime.utcnow() - reservation.usage_start_time).total_seconds()
+        else:
+            elapsed = 0
+        remaining = max(int(settings.session_duration_seconds - elapsed), 30)
+        back_url = f"{str(request.base_url).rstrip('/')}/labs"
+
+        try:
+            session_url = start_weblab_session(lab, user, duration_seconds=remaining, back_url=back_url)
+        except (httpx.HTTPError, WeblabSessionError) as err:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Could not start a session on the lab hardware: {err}",
+            )
+        reservation.weblab_session_url = session_url
+        db.commit()
     else:
-        elapsed = 0
-    remaining = max(int(settings.session_duration_seconds - elapsed), 30)
-    back_url = f"{str(request.base_url).rstrip('/')}/labs"
+        session_url = reservation.weblab_session_url
 
-    try:
-        session_url = start_weblab_session(lab, user, duration_seconds=remaining, back_url=back_url)
-    except (httpx.HTTPError, WeblabSessionError) as err:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not start a session on the lab hardware: {err}"
-        )
+    # Send the browser through our own reverse proxy (see
+    # routers/hardware_proxy.py) instead of straight at the bare CT300
+    # host:port - the container's own root-relative asset/AJAX URLs only
+    # resolve correctly against whatever origin the browser is currently
+    # on, and CT300 alone doesn't serve them under this origin.
+    parsed_session_url = httpx.URL(session_url)
+    proxied_path = f"/hw/{lab.id}{parsed_session_url.path}"
+    if parsed_session_url.query:
+        proxied_path = f"{proxied_path}?{parsed_session_url.query.decode()}"
+    proxied_url = f"{str(request.base_url).rstrip('/')}{proxied_path}"
 
-    return LabAccessOut(backend_url=session_url)
+    return LabAccessOut(backend_url=proxied_url)

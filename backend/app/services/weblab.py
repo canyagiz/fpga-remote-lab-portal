@@ -54,3 +54,47 @@ def start_weblab_session(lab: Lab, user: User, duration_seconds: int, back_url: 
     if "url" not in data:
         raise WeblabSessionError(data.get("message", "Hardware container refused to start a session"))
     return data["url"]
+
+
+def close_weblab_session(lab: Lab, session_id: str) -> None:
+    """Force-end a session from the broker side - labdiscoverylib's own
+    DELETE /sessions/{id} endpoint, whose docstring says exactly this is
+    for: "kick one user out... when an administrator defines so, or when
+    the assigned time is over."
+
+    Used whenever *we* end a reservation (Finish, Cancel, or the expiry
+    sweep noticing the allotted time ran out) instead of the user logging
+    out from inside the lab UI itself - without this, the hardware
+    session stays open: the browser tab that already had it loaded keeps
+    working, and worse, a second user can be granted a fresh session on
+    what our own database now considers a free board while the first
+    session is still physically live on CT300.
+    """
+    session_id = session_id.rstrip("/").rsplit("/", 1)[-1]
+    response = httpx.delete(
+        f"{lab.backend_url}{_SESSION_PATH}{session_id}",
+        auth=(settings.weblab_username, settings.weblab_password),
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
+def is_weblab_session_finished(lab: Lab, session_id: str) -> bool:
+    """Whether the hardware container itself already considers this
+    session over - explicit in-lab logout (arty_lab_overlay/views.py's
+    `/logout` route calls labdiscoverylib's logout(), which force-exits
+    the session), idle timeout, or running out of allotted time.
+
+    Polling this status endpoint is the protocol's own intended mechanism
+    for a broker to learn this - there is no push notification back to us,
+    so services/queue.py::sweep_logged_out_sessions calls this
+    periodically for every reservation with an open session.
+    """
+    session_id = session_id.rstrip("/").rsplit("/", 1)[-1]
+    response = httpx.get(
+        f"{lab.backend_url}/foo/ldl/sessions/{session_id}/status",
+        auth=(settings.weblab_username, settings.weblab_password),
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json().get("should_finish") == -1

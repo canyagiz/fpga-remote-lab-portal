@@ -114,8 +114,25 @@ existing static file, so React Router's client-side routes work on a hard
 refresh. Build the frontend first (see `../frontend/README.md`), then start
 this backend normally - no separate frontend server needed in production.
 
+## Hardware access (CT300)
+
+`GET /api/labs/{id}/access` calls the lab's own hardware container REST
+API directly (`app/services/weblab.py` - a plain HTTP call, no
+labdiscoverylib/WebLab-Deusto dependency in this project) to start a real
+session, then hands the browser a URL under `/hw/{lab_id}/...`.
+
+In production (see `../deploy/`), **nginx** - not this app - reverse-proxies
+that traffic straight to CT300, mirroring what CT200's own nginx does:
+`/hw/{lab_id}/*` and `/labfiles/*` go directly to the matching CT300
+container/port, with one exception - `POST /hw/{lab_id}/logout` is carved
+out back to this app, because closing the reservation the instant an
+in-lab "Log out" succeeds needs our own database (see
+`app/routers/hardware_proxy.py`). The background sweep
+(`services/queue.py::sweep_logged_out_sessions`) stays as a fallback for
+whenever that request never arrives (closed tab, dropped connection).
+
 ## Deliberately deferred (see project migration plan)
 
-- Hardware-access proxy layer (nginx `auth_request` + CT300 containers)
-- Multi-lab catalog population (Cyclone X/IV/V, Arty Z7)
 - German translation
+- Alembic migrations (schema changes are still applied by hand via `ALTER
+  TABLE` - see `[[project_ct210_migration_plan]]`)

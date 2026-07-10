@@ -10,7 +10,7 @@ export default function Navbar() {
 
   async function handleLogout() {
     await logout();
-    navigate("/login");
+    navigate("/");
   }
 
   return (
@@ -33,12 +33,20 @@ export default function Navbar() {
             <Link to="/labs" className="font-medium text-muted-foreground hover:text-foreground">
               Labs
             </Link>
+            <Link to="/calendar" className="font-medium text-muted-foreground hover:text-foreground">
+              Calendar
+            </Link>
             {user.role === "admin" && (
               <Link to="/admin/users" className="font-medium text-muted-foreground hover:text-foreground">
                 Users
               </Link>
             )}
-            <span className="border-l border-border pl-4 text-muted-foreground">{user.username}</span>
+            <Link
+              to="/profile"
+              className="border-l border-border pl-4 font-medium text-muted-foreground hover:text-foreground"
+            >
+              {user.username}
+            </Link>
             <Button variant="link" className="h-auto p-0" onClick={handleLogout}>
               Log out
             </Button>

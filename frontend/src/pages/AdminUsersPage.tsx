@@ -5,18 +5,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import * as api from "../api/client";
 import { User } from "../api/types";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 
 export default function AdminUsersPage() {
   const { user: currentUser } = useAuth();
+  const { showError } = useToast();
   const [users, setUsers] = useState<User[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   async function refresh() {
     try {
       setUsers(await api.getUsers());
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Failed to load users");
+      showError(err instanceof api.ApiError ? err.message : "Failed to load users");
     }
   }
 
@@ -28,12 +29,11 @@ export default function AdminUsersPage() {
     if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
 
     setBusyId(id);
-    setError(null);
     try {
       await api.deleteUser(id);
       await refresh();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Failed to delete user");
+      showError(err instanceof api.ApiError ? err.message : "Failed to delete user");
     } finally {
       setBusyId(null);
     }
@@ -42,7 +42,6 @@ export default function AdminUsersPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
       <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       <div className="mt-6">
         <Table>
           <TableHeader>

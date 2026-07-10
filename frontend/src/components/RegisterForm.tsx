@@ -1,24 +1,21 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, getCaptcha, getCsrfToken, register } from "../api/client";
+import { useToast } from "../context/ToastContext";
 import PasswordInput from "./PasswordInput";
 import PasswordStrength from "./PasswordStrength";
 
 interface RegisterFormProps {
-  /** When provided (e.g. inside a modal), switches modes in place instead
-   * of navigating to a separate /login page. */
-  onSwitchToLogin?: () => void;
-  /** Called right after a successful registration instead of showing an
-   * intermediate "registration successful" screen - e.g. closes the modal. */
-  onSuccess?: () => void;
+  onSwitchToLogin: () => void;
+  /** Called once the post-registration countdown finishes - closes the modal. */
+  onSuccess: () => void;
 }
 
 export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFormProps) {
-  const navigate = useNavigate();
+  const { showError } = useToast();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +26,6 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
   // Hidden from real users via CSS; bots that fill every field trip this.
   const [website, setWebsite] = useState("");
 
-  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [countdown, setCountdown] = useState(3);
@@ -37,16 +33,12 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
   useEffect(() => {
     if (!success) return;
     if (countdown <= 0) {
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        navigate("/");
-      }
+      onSuccess();
       return;
     }
     const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
-  }, [success, countdown, onSuccess, navigate]);
+  }, [success, countdown, onSuccess]);
 
   async function loadCaptchaAndCsrf() {
     // Sequential on purpose: both endpoints mutate the session cookie
@@ -70,14 +62,13 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
 
     if (password !== confirmPassword) {
-      setError("Passwords don't match");
+      showError("Passwords don't match");
       return;
     }
     if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+      showError("Password must be at least 8 characters");
       return;
     }
 
@@ -93,7 +84,7 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
       });
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Registration failed");
+      showError(err instanceof ApiError ? err.message : "Registration failed");
       await loadCaptchaAndCsrf();
     } finally {
       setSubmitting(false);
@@ -188,22 +179,15 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
             />
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={submitting}>
             Register
           </Button>
         </form>
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
-          {onSwitchToLogin ? (
-            <button type="button" onClick={onSwitchToLogin} className="font-medium text-primary hover:underline">
-              Sign in
-            </button>
-          ) : (
-            <Link to="/login" className="font-medium text-primary hover:underline">
-              Sign in
-            </Link>
-          )}
+          <button type="button" onClick={onSwitchToLogin} className="font-medium text-primary hover:underline">
+            Sign in
+          </button>
         </p>
       </CardContent>
     </>

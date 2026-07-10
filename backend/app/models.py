@@ -41,6 +41,25 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     reservations: Mapped[list["Reservation"]] = relationship(back_populates="user")
+    profile: Mapped["UserProfile | None"] = relationship(back_populates="user", uselist=False)
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    full_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    school: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # {"linkedin": "https://...", "github": "https://...", ...} - a fixed
+    # small set of platforms rendered as named fields on the frontend, not
+    # an open-ended list, to keep the profile form simple.
+    social_links: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="profile")
 
 
 class Lab(Base):
@@ -81,6 +100,13 @@ class Reservation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     usage_start_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     usage_end_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Cached WebLab session URL from the hardware container (see
+    # routers/labs.py::access_lab). Set once, on the first successful
+    # access for this reservation, and reused after that - without this,
+    # every call to /access (every tab, every click, every page refresh)
+    # would start a brand-new independent session on the same physical
+    # board, letting several tabs control the same hardware at once.
+    weblab_session_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="reservations")
     lab: Mapped["Lab"] = relationship(back_populates="reservations")
