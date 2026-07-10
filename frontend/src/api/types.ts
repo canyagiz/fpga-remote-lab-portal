@@ -68,6 +68,24 @@ export interface Profile {
   social_links: Record<string, string> | null;
 }
 
+export interface LabUsageStat {
+  lab_id: number;
+  lab_name: string;
+  image_url: string | null;
+  session_count: number;
+}
+
+export interface MyStats {
+  labs_demoed: LabUsageStat[];
+  labs_completed: LabUsageStat[];
+  total_reservations: number;
+  completed_count: number;
+  cancelled_count: number;
+  expired_count: number;
+  upcoming_count: number;
+  login_times: string[];
+}
+
 export interface CalendarEntry {
   lab_id: number;
   lab_name: string;

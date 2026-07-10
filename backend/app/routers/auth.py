@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import RegistrationAttempt, TwoFactorCode, User
+from app.models import LoginEvent, RegistrationAttempt, TwoFactorCode, User
 from app.schemas import (
     CaptchaOut,
     LoginRequest,
@@ -124,6 +124,8 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         )
 
     request.session["user_id"] = user.id
+    db.add(LoginEvent(user_id=user.id))
+    db.commit()
     return LoginResult(success=True, require_2fa=False)
 
 
@@ -151,6 +153,9 @@ def verify_two_factor(payload: Verify2FARequest, request: Request, db: Session =
     # verification turns it off for this account; future logins skip
     # straight through.
     user.two_factor_enabled = False
+    # This is the moment a 2FA login actually succeeds - the sign-in is
+    # recorded here, not in /login (which only sent the code).
+    db.add(LoginEvent(user_id=user.id))
     db.commit()
 
     request.session.pop("pending_2fa_user_id", None)

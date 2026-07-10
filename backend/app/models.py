@@ -130,3 +130,18 @@ class RegistrationAttempt(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ip_address: Mapped[str] = mapped_column(String(45))
     attempt_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LoginEvent(Base):
+    """One row per successful sign-in (plain login or the 2FA verify step).
+
+    Powers the Dashboard's daily-login-frequency chart - nothing else
+    reads it. CASCADE (unlike reservations) because login history is
+    activity telemetry, not an audit trail worth blocking user deletion.
+    """
+
+    __tablename__ = "login_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

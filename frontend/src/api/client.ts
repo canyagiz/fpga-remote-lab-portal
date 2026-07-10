@@ -6,6 +6,7 @@ import {
   LabAccess,
   LoginResult,
   MessageResponse,
+  MyStats,
   Profile,
   Reservation,
   User,
@@ -90,6 +91,10 @@ export const accessNow = (labId: number) =>
 export const cancelReservation = (id: number) => post<Reservation>(`/api/reservations/${id}/cancel`);
 export const completeLabUsage = (id: number) => post<Reservation>(`/api/reservations/${id}/complete`);
 export const getCalendar = () => get<CalendarEntry[]>("/api/reservations/calendar");
+
+// --- stats ---
+
+export const getMyStats = () => get<MyStats>("/api/stats/me");
 
 // --- profile ---
 

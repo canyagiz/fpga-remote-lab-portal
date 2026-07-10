@@ -130,6 +130,30 @@ class ReservationOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LabUsageStat(BaseModel):
+    lab_id: int
+    lab_name: str
+    image_url: str | None
+    session_count: int
+
+
+class MyStatsOut(BaseModel):
+    # Labs the user has actually run at least one session on (demoed),
+    # regardless of how that session ended, vs. labs with at least one
+    # cleanly completed session.
+    labs_demoed: list[LabUsageStat]
+    labs_completed: list[LabUsageStat]
+    total_reservations: int
+    completed_count: int
+    cancelled_count: int
+    expired_count: int
+    upcoming_count: int
+    # Raw sign-in timestamps (tz-aware UTC) rather than server-side daily
+    # buckets: the browser groups them by the viewer's local day, same
+    # UTC-storage/local-display convention as everywhere else.
+    login_times: list[datetime]
+
+
 class CalendarEntryOut(BaseModel):
     lab_id: int
     lab_name: str

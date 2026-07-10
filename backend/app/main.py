@@ -11,7 +11,7 @@ from starlette.responses import FileResponse
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.models import Lab
-from app.routers import auth, hardware_proxy, labs, profile, reservations, users
+from app.routers import auth, hardware_proxy, labs, profile, reservations, stats, users
 from app.services.queue import sweep_expired_reservations, sweep_logged_out_sessions
 
 logger = logging.getLogger("fpga_remote_lab")
@@ -119,6 +119,7 @@ app.include_router(labs.router, prefix="/api")
 app.include_router(reservations.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
+app.include_router(stats.router, prefix="/api")
 
 # Not under /api: nginx now reverse-proxies /hw/{lab_id}/* and
 # /labfiles/* straight to CT300 itself (see
