@@ -179,16 +179,19 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
               </div>
             )}
 
-            {/* Reservation pins - a duration bar from start to end (the
-                real lab session length), capped by a circle at each end,
-                so the timeline shows how long the board is actually
-                occupied instead of a single dot with no sense of extent. */}
+            {/* Reservation pins - a single pill spanning exactly [start,
+                end), flush at both ends. An earlier version centered a
+                20px circle ON the start instant, which made a short (e.g.
+                4-minute) session visually start ~5 minutes before its real
+                start and blur into the end marker - the pill's edges, not
+                an oversized circle's center, are what must land on the
+                real timestamps. */}
             {dayEntries.map(({ e, start, end }, i) => {
               const top = minsSinceMidnight(start) * PX_PER_MIN;
-              const barHeight = Math.max(minsSinceMidnight(end) * PX_PER_MIN - top, 6);
+              const barHeight = Math.max(minsSinceMidnight(end) * PX_PER_MIN - top, 8);
               const isActive = e.status === "active";
               const isOpen = expanded === i;
-              const dot = isActive ? "bg-destructive" : "bg-warning";
+              const fill = isActive ? "bg-destructive" : "bg-warning";
               return (
                 <div
                   key={i}
@@ -201,34 +204,26 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
                     setExpanded(isOpen ? null : i);
                   }}
                 >
-                  {/* Duration bar - offsets are absolute (not padding-
-                      derived): a positioned descendant's `left` is relative
-                      to this container's own edge, not indented by any
-                      padding, so the 56px clearance for the HH:MM labels is
-                      baked into each of these three elements directly. */}
-                  <span
-                    className={"absolute left-16 top-0 w-1 rounded-full " + dot + " opacity-50"}
-                    style={{ height: barHeight }}
-                  />
-                  {/* Start marker */}
-                  <span
-                    className={"absolute left-14 block h-5 w-5 rounded-full border-2 border-card shadow transition-transform hover:scale-125 " + dot}
-                    style={{ top: -10 }}
+                  {/* The pill itself is the pin - its top/bottom edges are
+                      the session's real start/end, not its center. `left`
+                      here is relative to this container's own edge, not
+                      padding-derived, so the 56px clearance for the HH:MM
+                      labels is baked into the value directly. */}
+                  <div
+                    className={
+                      "absolute left-14 h-full w-3 cursor-pointer rounded-full border-2 border-card shadow transition-transform hover:scale-x-125 " +
+                      fill
+                    }
                   >
                     {isActive && (
-                      <span className="absolute inline-flex h-5 w-5 animate-ping rounded-full bg-destructive opacity-60" />
+                      <span className="absolute inset-x-0 top-0 h-3 animate-ping rounded-full bg-destructive opacity-60" />
                     )}
-                  </span>
-                  {/* End marker */}
-                  <span
-                    className={"absolute block h-3 w-3 rounded-full border-2 border-card shadow " + dot}
-                    style={{ top: barHeight - 6, left: 60 }}
-                  />
+                  </div>
 
                   {isOpen && (
                     <div
                       className={
-                        "absolute left-14 top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
+                        "absolute left-20 top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
                         (isActive
                           ? "bg-destructive text-destructive-foreground"
                           : "border border-warning bg-warning-muted text-warning-muted-foreground")
