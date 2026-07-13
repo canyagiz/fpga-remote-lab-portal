@@ -167,16 +167,25 @@ export default function LabsPage() {
             </div>
             <CardContent className="flex flex-1 flex-col gap-4 pt-5">
               {lab.is_public && (
-                <p
-                  className={
-                    "text-sm font-medium " +
-                    (lab.next_available_at === null || new Date(lab.next_available_at).getTime() <= now
-                      ? "text-success"
-                      : "text-muted-foreground")
-                  }
-                >
-                  {formatAvailability(lab.next_available_at, now)}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p
+                    className={
+                      "text-sm font-medium " +
+                      (lab.next_available_at === null || new Date(lab.next_available_at).getTime() <= now
+                        ? "text-success"
+                        : "text-muted-foreground")
+                    }
+                  >
+                    {formatAvailability(lab.next_available_at, now)}
+                  </p>
+                  {lab.guide_url && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={lab.guide_url} target="_blank" rel="noopener noreferrer">
+                        Go to Guide
+                      </a>
+                    </Button>
+                  )}
+                </div>
               )}
               <p className="text-sm text-muted-foreground">{lab.description}</p>
 
@@ -204,13 +213,6 @@ export default function LabsPage() {
                     onClick={() => setSchedulingLabId(schedulingLabId === lab.id ? null : lab.id)}
                   >
                     Reserve for later
-                  </Button>
-                )}
-                {lab.guide_url && (
-                  <Button size="sm" variant="outline" className="w-full" asChild>
-                    <a href={lab.guide_url} target="_blank" rel="noopener noreferrer">
-                      Go to Guide
-                    </a>
                   </Button>
                 )}
               </div>
