@@ -79,6 +79,21 @@ class ProfileOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PublicProfileOut(BaseModel):
+    # Shown to any other signed-in user (e.g. tapping a name on the
+    # Calendar) - same fields as ProfileOut plus the username itself,
+    # since the caller isn't necessarily looking at their own profile.
+    username: str
+    full_name: str | None
+    school: str | None
+    department: str | None
+    age: int | None
+    bio: str | None
+    social_links: dict[str, str] | None
+
+    model_config = {"from_attributes": True}
+
+
 class ProfileUpdate(BaseModel):
     full_name: str | None = Field(default=None, max_length=100)
     school: str | None = Field(default=None, max_length=150)

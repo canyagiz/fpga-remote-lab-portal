@@ -119,8 +119,8 @@ export default function ProfilePage() {
               <Input
                 id="age"
                 type="number"
-                min={0}
-                max={150}
+                min={14}
+                max={120}
                 className="max-w-24"
                 value={profile.age ?? ""}
                 onChange={(e) => updateField("age", e.target.value ? parseInt(e.target.value, 10) : null)}

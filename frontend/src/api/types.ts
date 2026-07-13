@@ -70,6 +70,10 @@ export interface Profile {
   social_links: Record<string, string> | null;
 }
 
+export interface PublicProfile extends Profile {
+  username: string;
+}
+
 export interface LabUsageStat {
   lab_id: number;
   lab_name: string;

@@ -64,6 +64,46 @@ def test_profile_rejects_an_unreasonable_age(client):
     assert response.status_code == 422
 
 
+def test_public_profile_is_viewable_by_any_signed_in_user(client):
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+    client.put(
+        "/api/profile",
+        json={"full_name": "User One", "school": "H-BRS", "department": None, "age": None, "bio": None,
+              "social_links": None},
+    )
+
+    register(client, "user2", "user2@example.com")
+    login(client, "user2")
+
+    response = client.get("/api/profile/user1")
+    assert response.status_code == 200
+    assert response.json()["username"] == "user1"
+    assert response.json()["full_name"] == "User One"
+
+
+def test_public_profile_lookup_is_case_insensitive(client):
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    response = client.get("/api/profile/USER1")
+    assert response.status_code == 200
+    assert response.json()["username"] == "user1"
+
+
+def test_public_profile_404s_for_an_unknown_username(client):
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    response = client.get("/api/profile/nobody-here")
+    assert response.status_code == 404
+
+
+def test_public_profile_requires_authentication(client):
+    response = client.get("/api/profile/user1")
+    assert response.status_code == 401
+
+
 def test_profile_is_private_per_user(client):
     register(client, "user1", "user1@example.com")
     login(client, "user1")

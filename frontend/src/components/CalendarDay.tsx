@@ -1,8 +1,24 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarEntry } from "../api/types";
+
+// A stable, distinct color per username (same person always gets the same
+// color, different people almost always get visibly different ones) so a
+// card with several bookers reads at a glance instead of everyone being
+// the same one or two status colors. "Currently active" is still shown
+// separately via the pulsing ping overlay, not by color.
+function colorForUsername(username: string): string {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+    hash |= 0;
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 42%)`;
+}
 
 // A full local day, 00:00-24:00, drawn as a vertical scrollable strip in
 // 5-minute resolution. 8px/min => 1h = 480px = one full viewport height, so
@@ -183,7 +199,7 @@ export default function CalendarDay({ labName, labImageUrl, entries }: CalendarD
               const barHeight = Math.max(minsSinceMidnight(end) * PX_PER_MIN - top, 8);
               const isActive = e.status === "active";
               const isOpen = expanded === i;
-              const fill = isActive ? "bg-destructive" : "bg-warning";
+              const color = colorForUsername(e.username);
               return (
                 <div
                   key={i}
@@ -200,26 +216,23 @@ export default function CalendarDay({ labName, labImageUrl, entries }: CalendarD
                       the session's real start/end, not its center. `left`
                       here is relative to this container's own edge, not
                       padding-derived, so the 56px clearance for the HH:MM
-                      labels is baked into the value directly. */}
+                      labels is baked into the value directly. Color is
+                      per-username (colorForUsername), not per-status -
+                      "currently active" is shown by the ping overlay
+                      instead, so it stays visible regardless of hue. */}
                   <div
-                    className={
-                      "absolute left-14 h-full w-4 cursor-pointer rounded-full border-2 border-card shadow transition-transform hover:scale-x-125 " +
-                      fill
-                    }
+                    className="absolute left-14 h-full w-4 cursor-pointer rounded-full border-2 border-card shadow transition-transform hover:scale-x-125"
+                    style={{ backgroundColor: color }}
                   >
                     {isActive && (
-                      <span className="absolute inset-x-0 top-0 h-4 animate-ping rounded-full bg-destructive opacity-60" />
+                      <span className="absolute inset-x-0 top-0 h-4 animate-ping rounded-full bg-white opacity-70" />
                     )}
                   </div>
 
                   {isOpen && (
                     <div
-                      className={
-                        "absolute left-[88px] top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
-                        (isActive
-                          ? "bg-destructive text-destructive-foreground"
-                          : "border border-warning bg-warning-muted text-warning-muted-foreground")
-                      }
+                      className="absolute left-[88px] top-0 origin-left animate-in fade-in-0 zoom-in-95 rounded-lg px-3 py-1.5 text-white shadow-md"
+                      style={{ backgroundColor: color }}
                     >
                       <div className="flex items-center gap-1.5 text-sm font-semibold">
                         {isActive && (
@@ -228,7 +241,13 @@ export default function CalendarDay({ labName, labImageUrl, entries }: CalendarD
                             <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
                           </span>
                         )}
-                        {e.username}
+                        <Link
+                          to={`/users/${encodeURIComponent(e.username)}`}
+                          className="cursor-pointer underline-offset-2 hover:underline"
+                          onClick={(ev) => ev.stopPropagation()}
+                        >
+                          {e.username}
+                        </Link>
                       </div>
                       <div className="text-xs opacity-90">
                         {timeLabel(start)} - {timeLabel(end)}

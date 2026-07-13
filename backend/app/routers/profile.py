@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import User, UserProfile
-from app.schemas import ProfileOut, ProfileUpdate
+from app.schemas import ProfileOut, ProfileUpdate, PublicProfileOut
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -16,6 +17,31 @@ def get_my_profile(db: Session = Depends(get_db), user: User = Depends(get_curre
         # all-empty one rather than 404, since "no profile" isn't an error.
         return ProfileOut(full_name=None, school=None, department=None, age=None, bio=None, social_links=None)
     return ProfileOut.model_validate(user.profile)
+
+
+@router.get("/{username}", response_model=PublicProfileOut)
+def get_public_profile(
+    username: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)
+):
+    """Any other signed-in user's profile - reachable by tapping a name on
+    the Calendar. Any authenticated user can view any other's (this is an
+    internal university lab tool, not a public site) - a deliberate
+    change from the Calendar's own username-only design, made at the
+    user's explicit request.
+    """
+    target = db.scalar(select(User).where(func.lower(User.username) == username.lower()))
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target.profile is None:
+        return PublicProfileOut(
+            username=target.username, full_name=None, school=None, department=None, age=None, bio=None,
+            social_links=None,
+        )
+    return PublicProfileOut(username=target.username, **{
+        k: getattr(target.profile, k)
+        for k in ("full_name", "school", "department", "age", "bio", "social_links")
+    })
 
 
 @router.put("", response_model=ProfileOut)
