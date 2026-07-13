@@ -21,7 +21,11 @@ export default function CalendarPage() {
 
   useEffect(() => {
     refresh();
-    const interval = setInterval(refresh, 15000);
+    // Kept tight (the backend's own expiry sweep now runs every 5s - see
+    // services/queue.py) so a session that just ended (Finish, in-lab
+    // logout, or ran out of time) disappears from here promptly instead
+    // of sitting stale for up to 15s.
+    const interval = setInterval(refresh, 3000);
     return () => clearInterval(interval);
   }, []);
 

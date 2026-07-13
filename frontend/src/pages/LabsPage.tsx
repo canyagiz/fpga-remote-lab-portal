@@ -86,8 +86,11 @@ export default function LabsPage() {
   useEffect(() => {
     refresh();
     // Someone else's reservation can change a card's availability at any
-    // time - poll rather than requiring a manual refresh.
-    const poll = setInterval(refresh, 15000);
+    // time - poll rather than requiring a manual refresh. Kept tight (the
+    // backend's own expiry/access-grace sweep now runs every 5s - see
+    // services/queue.py) so a card showing "Available now" doesn't sit
+    // stale for up to 15s after the board actually stopped being free.
+    const poll = setInterval(refresh, 3000);
     return () => clearInterval(poll);
   }, []);
 
@@ -110,6 +113,10 @@ export default function LabsPage() {
       openLabWindow(lab.id, access.backend_url);
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Failed to access lab");
+      // The card's "Available now" was stale by the time this was clicked
+      // (someone else just took the board, or the moment simply passed) -
+      // don't leave it showing the wrong thing until the next 3s poll.
+      await refresh();
     } finally {
       setBusyLabId(null);
     }

@@ -157,8 +157,11 @@ export default function DashboardPage() {
   useEffect(() => {
     refresh();
     // Reservation status changes on its own (scheduled slots activate,
-    // sessions expire) - poll rather than requiring a manual refresh.
-    const interval = setInterval(refresh, 15000);
+    // sessions expire) - poll rather than requiring a manual refresh. Kept
+    // tight (the backend's own expiry/access-grace sweep now runs every
+    // 5s - see services/queue.py) so this reflects a change from another
+    // tab/device promptly instead of lagging up to 15s behind it.
+    const interval = setInterval(refresh, 3000);
     return () => clearInterval(interval);
   }, []);
 
