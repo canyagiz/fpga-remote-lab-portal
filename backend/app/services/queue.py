@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Reservation, ReservationStatus
+from app.services.availability import ACCESS_GRACE_PERIOD
 from app.services.weblab import close_weblab_session, is_weblab_session_finished
 
 logger = logging.getLogger("fpga_remote_lab")
@@ -71,8 +72,12 @@ def sweep_expired_reservations(db: Session) -> int:
                         reservation.lab_id,
                     )
         elif reservation.reservation_date and reservation.reservation_time:
+            # A scheduled slot nobody accessed - give the grace period
+            # access_now itself enforces (see
+            # services/availability.py::access_deadline) before giving up
+            # on it, not the instant the clock passes the scheduled time.
             scheduled_at = datetime.combine(reservation.reservation_date, reservation.reservation_time)
-            if now <= scheduled_at:
+            if now <= scheduled_at + ACCESS_GRACE_PERIOD:
                 continue
         else:
             # A queue entry with no fixed time never expires on its own.

@@ -27,7 +27,15 @@ class Settings(BaseSettings):
 
     session_duration_seconds: int = 240
     min_reservation_advance_minutes: int = 5
-    expiry_sweep_interval_seconds: int = 60
+    # Once a scheduled reservation's time arrives, the user has this long to
+    # actually click Access before it's given up - see
+    # services/availability.py::access_deadline. Sweep interval is kept
+    # short relative to this so a missed slot is reflected as `expired`
+    # (and drops off the Dashboard) soon after the grace window closes -
+    # though the real enforcement is synchronous in access_now itself, not
+    # dependent on the sweep ever running.
+    access_grace_period_seconds: int = 10
+    expiry_sweep_interval_seconds: int = 5
 
     # Basic Auth credentials the CT300 hardware containers' own
     # labdiscoverylib session API expects from whichever broker calls it.

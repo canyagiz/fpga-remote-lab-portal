@@ -126,6 +126,12 @@ class ReservationOut(BaseModel):
     # session_duration_seconds itself.
     usage_start_time: datetime | None
     session_ends_at: datetime | None
+    # Only set for a pending, scheduled reservation whose slot has a fixed
+    # time - the moment Access stops working for it if nobody clicks it
+    # (see services/availability.py::access_deadline). Lets the frontend
+    # count down the same grace period access_now itself enforces, instead
+    # of guessing at a duplicated magic number.
+    access_deadline: datetime | None
 
     model_config = {"from_attributes": True}
 

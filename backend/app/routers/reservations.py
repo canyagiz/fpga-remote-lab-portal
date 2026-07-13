@@ -12,7 +12,9 @@ from app.deps import get_current_user
 from app.models import Reservation, ReservationStatus, User
 from app.schemas import CalendarEntryOut, JoinQueueRequest, ReservationCreate, ReservationOut
 from app.services.availability import (
+    ACCESS_GRACE_PERIOD as _ACCESS_GRACE_PERIOD,
     SESSION_LENGTH as _SESSION_LENGTH,
+    access_deadline as _access_deadline,
     overlapping_reservation as _overlapping_reservation,
     reservation_window as _reservation_window,
 )
@@ -54,6 +56,7 @@ def _utc(dt: datetime) -> datetime:
 
 def _to_out(reservation: Reservation) -> ReservationOut:
     usage_start = reservation.usage_start_time
+    deadline = _access_deadline(reservation)
     return ReservationOut(
         id=reservation.id,
         lab_id=reservation.lab_id,
@@ -65,6 +68,7 @@ def _to_out(reservation: Reservation) -> ReservationOut:
         created_at=reservation.created_at,
         usage_start_time=_utc(usage_start) if usage_start is not None else None,
         session_ends_at=_utc(usage_start + _SESSION_LENGTH) if usage_start is not None else None,
+        access_deadline=_utc(deadline) if deadline is not None else None,
     )
 
 
@@ -219,7 +223,10 @@ def access_now(payload: JoinQueueRequest, db: Session = Depends(get_db), user: U
     covering = None
     for r in own_scheduled:
         start = datetime.combine(r.reservation_date, r.reservation_time)
-        if start <= now < start + _SESSION_LENGTH:
+        # Only a short grace period past the scheduled start, not the full
+        # session length - see services/availability.py::access_deadline
+        # (the value the frontend counts down against).
+        if start <= now < start + _ACCESS_GRACE_PERIOD:
             covering = r
             break
 

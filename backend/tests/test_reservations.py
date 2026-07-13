@@ -91,6 +91,194 @@ def test_access_now_activates_a_scheduled_reservation_whose_time_has_come(client
     assert entered.json()["id"] == resv["id"]
 
 
+def test_access_deadline_is_only_set_for_a_pending_scheduled_reservation(client):
+    from app.config import settings
+
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    slot = datetime.utcnow() + timedelta(hours=2)
+    resv = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    assert resv["access_deadline"] is not None
+    deadline = datetime.fromisoformat(resv["access_deadline"].replace("Z", "+00:00")).replace(tzinfo=None)
+    expected = slot.replace(microsecond=0) + timedelta(seconds=settings.access_grace_period_seconds)
+    assert abs((deadline - expected).total_seconds()) < 1
+
+    # An immediate (unscheduled) active session has no access_deadline -
+    # it's already been accessed, that's what session_ends_at is for.
+    # Cancel the scheduled reservation first so it doesn't block an
+    # immediate access-now for the same lab.
+    client.post(f"/api/reservations/{resv['id']}/cancel")
+    active = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
+    assert active["access_deadline"] is None
+
+
+def test_access_now_still_works_within_the_grace_period_after_the_scheduled_time(client):
+    from app.database import SessionLocal
+    from app.models import Reservation
+
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    slot = datetime.utcnow() + timedelta(hours=2)
+    resv = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        # 3 seconds past the scheduled start - well inside the default
+        # 10-second grace period.
+        past_start = datetime.utcnow() - timedelta(seconds=3)
+        row.reservation_date = past_start.date()
+        row.reservation_time = past_start.time()
+        db.commit()
+    finally:
+        db.close()
+
+    entered = client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+    assert entered.status_code in (200, 201)
+    assert entered.json()["status"] == "active"
+
+
+def test_access_now_refuses_a_scheduled_reservation_past_its_grace_period(client):
+    from app.database import SessionLocal
+    from app.models import Reservation
+
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    slot = datetime.utcnow() + timedelta(hours=2)
+    resv = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        # 20 seconds past the scheduled start - beyond the default
+        # 10-second grace period, so it's a missed slot now.
+        missed = datetime.utcnow() - timedelta(seconds=20)
+        row.reservation_date = missed.date()
+        row.reservation_time = missed.time()
+        db.commit()
+    finally:
+        db.close()
+
+    missed_click = client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+    assert missed_click.status_code == 409
+
+
+def test_expiry_sweep_leaves_a_scheduled_reservation_alone_during_its_grace_period(client):
+    from app.database import SessionLocal
+    from app.models import Reservation
+    from app.services.queue import sweep_expired_reservations
+
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    slot = datetime.utcnow() + timedelta(hours=2)
+    resv = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        past_start = datetime.utcnow() - timedelta(seconds=3)
+        row.reservation_date = past_start.date()
+        row.reservation_time = past_start.time()
+        db.commit()
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        expired_count = sweep_expired_reservations(db)
+    finally:
+        db.close()
+    assert expired_count == 0
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        assert row.status.value == "pending"
+    finally:
+        db.close()
+
+
+def test_expiry_sweep_expires_a_scheduled_reservation_after_its_grace_period(client):
+    from app.database import SessionLocal
+    from app.models import Reservation
+    from app.services.queue import sweep_expired_reservations
+
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    slot = datetime.utcnow() + timedelta(hours=2)
+    resv = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        missed = datetime.utcnow() - timedelta(seconds=20)
+        row.reservation_date = missed.date()
+        row.reservation_time = missed.time()
+        db.commit()
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
+        expired_count = sweep_expired_reservations(db)
+    finally:
+        db.close()
+    assert expired_count == 1
+
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, resv["id"])
+        assert row.status.value == "expired"
+    finally:
+        db.close()
+
+
 def test_cancel_frees_the_slot_for_a_new_booking(client):
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")

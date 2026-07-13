@@ -13,6 +13,24 @@ from app.models import Reservation, ReservationStatus
 # boundary (schemas), never in here.
 
 SESSION_LENGTH = timedelta(seconds=settings.session_duration_seconds)
+ACCESS_GRACE_PERIOD = timedelta(seconds=settings.access_grace_period_seconds)
+
+
+def access_deadline(reservation: Reservation) -> datetime | None:
+    """The last instant a *pending, scheduled* reservation can still be
+    turned into a real session via Access - `reservation_time` plus a
+    short grace period, not the full session length. None for anything
+    that isn't a not-yet-activated scheduled booking (active sessions
+    have their own session_ends_at instead; immediate/queue entries have
+    no scheduled slot to have a deadline against)."""
+    if (
+        reservation.status != ReservationStatus.pending
+        or reservation.reservation_date is None
+        or reservation.reservation_time is None
+    ):
+        return None
+    scheduled_at = datetime.combine(reservation.reservation_date, reservation.reservation_time)
+    return scheduled_at + ACCESS_GRACE_PERIOD
 
 
 def reservation_window(reservation: Reservation) -> tuple[datetime, datetime] | None:

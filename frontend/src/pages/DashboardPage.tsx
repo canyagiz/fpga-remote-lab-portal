@@ -202,10 +202,17 @@ export default function DashboardPage() {
   // A session past its allotted time is already over - Finish can no
   // longer close it (the backend rejects that; the background sweep marks
   // it expired shortly) - so drop it from view immediately instead of
-  // leaving a stale, now-pointless Finish button up for up to a minute.
+  // leaving a stale, now-pointless Finish button up. Same idea for a
+  // scheduled reservation nobody accessed within its grace period -
+  // access_now itself would already refuse it.
   const visible = reservations.filter((r) => {
-    if (r.status !== "active" || !r.session_ends_at) return true;
-    return new Date(r.session_ends_at).getTime() > now;
+    if (r.status === "active" && r.session_ends_at) {
+      return new Date(r.session_ends_at).getTime() > now;
+    }
+    if (r.status === "pending" && r.access_deadline) {
+      return new Date(r.access_deadline).getTime() > now;
+    }
+    return true;
   });
 
   const reservationSummary = stats
@@ -234,6 +241,13 @@ export default function DashboardPage() {
                 : null;
             const canAccessScheduled = scheduledStart !== null && now >= scheduledStart.getTime();
             const remainingMs = r.session_ends_at ? new Date(r.session_ends_at).getTime() - now : null;
+            // Once the scheduled time arrives, access_now only honors this
+            // reservation for a short grace period (access_deadline, from
+            // the backend - see services/availability.py) before treating
+            // it as missed. Count that down visibly instead of just
+            // flipping "Not yet" to "Access" with no sense of urgency.
+            const graceMs =
+              canAccessScheduled && r.access_deadline ? new Date(r.access_deadline).getTime() - now : null;
 
             return (
               <li key={r.id}>
@@ -251,6 +265,11 @@ export default function DashboardPage() {
                       {r.status === "active" && remainingMs !== null && (
                         <span className="text-sm text-muted-foreground">
                           {formatCountdown(remainingMs)} remaining
+                        </span>
+                      )}
+                      {graceMs !== null && graceMs > 0 && (
+                        <span className="text-sm font-semibold text-warning-muted-foreground">
+                          {Math.ceil(graceMs / 1000)}s to Access
                         </span>
                       )}
                     </div>

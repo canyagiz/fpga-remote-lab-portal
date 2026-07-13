@@ -57,6 +57,7 @@ export interface Reservation {
   created_at: string;
   usage_start_time: string | null;
   session_ends_at: string | null;
+  access_deadline: string | null;
 }
 
 export interface Profile {
