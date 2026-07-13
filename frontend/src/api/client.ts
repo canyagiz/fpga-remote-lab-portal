@@ -13,6 +13,27 @@ import {
   User,
 } from "./types";
 
+// FastAPI's own validation errors (422) send `detail` as an ARRAY of
+// {loc, msg, type} objects, not a string - passing that straight to
+// ApiError's Error-subclass constructor stringified the array as the
+// unhelpful "[object Object]" seen in toasts (e.g. the email
+// deliverability check's message never actually reached the user).
+// A plain string detail (every other error in this app) passes through
+// unchanged.
+function extractErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((e) => {
+      const msg = e && typeof e === "object" && "msg" in e ? String(e.msg) : String(e);
+      // Pydantic prefixes every raised ValueError with this - it's
+      // meaningless to a user reading the toast.
+      return msg.replace(/^Value error, /, "");
+    });
+    if (messages.length) return messages.join(" ");
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -24,10 +45,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    let detail = response.statusText;
+    let detail: string = response.statusText;
     try {
       const body = await response.json();
-      detail = body.detail ?? detail;
+      detail = extractErrorMessage(body.detail, detail);
     } catch {
       // Response body wasn't JSON - fall back to the status text above.
     }
