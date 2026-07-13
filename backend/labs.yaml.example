@@ -1,0 +1,68 @@
+# The lab catalog for this deployment - the single source of truth for
+# both the database seed (see app/main.py::_load_lab_catalog) and the
+# nginx hardware-proxy routing (see deploy/generate_nginx_config.py,
+# which renders deploy/nginx-fgpa-remote-lab.conf.j2 from this file).
+# Editing IPs/ports/labs here and re-running that script is now the
+# only place this information lives - it used to be hardcoded in
+# app/main.py AND hand-copied into the nginx config separately, which
+# could (and did) drift out of sync.
+#
+# Copy this file to labs.yaml and edit it for your own hardware before
+# first startup. labs.yaml is only read to SEED an empty database - once
+# a lab row exists, changing this file does not update it (use the
+# admin API, or wipe and re-seed a fresh deployment).
+
+# The CT300-equivalent host that serves shared static lab files (logos,
+# default images) via its own nginx on port 80. If your hardware
+# containers don't have a separate static-file server like this, point
+# it at any reachable host - the /labfiles/ location just won't be used.
+labfiles_host: "10.30.70.23"
+
+labs:
+  # `id` is the database primary key AND the value nginx's lab_id->port
+  # map keys off of - it must be stable once real reservations exist for
+  # a lab. Pick these once, in whatever order you like; they don't need
+  # to be contiguous.
+  - id: 1
+    name: "Cyclone 10 Lab"
+    description: "Access an FPGA board with a Cyclone 10 FPGA for image processing"
+    image_url: "/labs/EduPow_CX.jpg"
+    # host:port of this board's own hardware container - must speak the
+    # labdiscoverylib REST API (see backend/app/services/weblab.py) for
+    # Access to actually work. A board that doesn't run labdiscoverylib
+    # needs that integration layer adapted first; this config alone
+    # doesn't change what protocol the hardware itself speaks.
+    backend_url: "http://10.30.70.23:5000"
+    keywords: ["fpga", "electronics", "image processing", "cyclone10"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 2
+    name: "Cyclone IV Lab"
+    description: "Access an FPGA board with a Cyclone IV FPGA for image processing"
+    image_url: "/labs/EduPow_CIV.jpg"
+    backend_url: "http://10.30.70.23:5001"
+    keywords: ["fpga", "electronics", "image processing", "cyclone4"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 3
+    name: "Cyclone V Lab"
+    description: "Access an FPGA board with a Cyclone V FPGA for image processing"
+    image_url: "/labs/EduPow_CV.jpg"
+    backend_url: "http://10.30.70.23:5002"
+    keywords: ["fpga", "electronics", "image processing", "cyclone5"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 4
+    name: "Arty Z7 Lab"
+    description: "Access an FPGA board with a Xilinx Zynq-7020 FPGA for image processing"
+    image_url: "/labs/EduPow_Z7.png"
+    backend_url: "http://10.30.70.23:5003"
+    keywords: ["fpga", "electronics", "image processing", "xilinx", "zynq"]
+    features: ["feature1", "feature2"]
+    is_public: true
+    # Optional - a self-hosted prerequisites/orientation page under
+    # frontend/public/guides/. Omit entirely if a lab has none.
+    guide_url: "/guides/arty-prerequest.html"

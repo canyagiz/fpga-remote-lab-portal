@@ -1,0 +1,49 @@
+# CT210's live lab catalog - the single source of truth for both the
+# database seed (app/main.py::_load_lab_catalog) and the nginx
+# hardware-proxy routing (deploy/generate_nginx_config.py renders
+# deploy/nginx-fgpa-remote-lab.conf.j2 from this file). See
+# labs.yaml.example for the annotated version of this same format,
+# meant for a fresh deployment on different hardware.
+#
+# Only read to SEED an empty database - editing this file does not
+# retroactively change an already-seeded lab row.
+
+labfiles_host: "10.30.70.23"
+
+labs:
+  - id: 1
+    name: "Cyclone 10 Lab"
+    description: "Access an FPGA board with a Cyclone 10 FPGA for image processing"
+    image_url: "/labs/EduPow_CX.jpg"
+    backend_url: "http://10.30.70.23:5000"
+    keywords: ["fpga", "electronics", "image processing", "cyclone10"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 2
+    name: "Cyclone IV Lab"
+    description: "Access an FPGA board with a Cyclone IV FPGA for image processing"
+    image_url: "/labs/EduPow_CIV.jpg"
+    backend_url: "http://10.30.70.23:5001"
+    keywords: ["fpga", "electronics", "image processing", "cyclone4"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 3
+    name: "Cyclone V Lab"
+    description: "Access an FPGA board with a Cyclone V FPGA for image processing"
+    image_url: "/labs/EduPow_CV.jpg"
+    backend_url: "http://10.30.70.23:5002"
+    keywords: ["fpga", "electronics", "image processing", "cyclone5"]
+    features: ["feature1", "feature2"]
+    is_public: false
+
+  - id: 4
+    name: "Arty Z7 Lab"
+    description: "Access an FPGA board with a Xilinx Zynq-7020 FPGA for image processing"
+    image_url: "/labs/EduPow_Z7.png"
+    backend_url: "http://10.30.70.23:5003"
+    keywords: ["fpga", "electronics", "image processing", "xilinx", "zynq"]
+    features: ["feature1", "feature2"]
+    is_public: true
+    guide_url: "/guides/arty-prerequest.html"

@@ -23,10 +23,9 @@
 # actually sent.
 map $lab_id $ct300_upstream {
     default        "";
-    1              10.30.70.23:5000; # Cyclone 10 Lab
-    2              10.30.70.23:5001; # Cyclone IV Lab
-    3              10.30.70.23:5002; # Cyclone V Lab
-    4              10.30.70.23:5003; # Arty Z7 Lab
+{% for lab in labs %}
+    {{ lab.id }}              {{ lab.upstream }}; # {{ lab.name }}
+{% endfor %}
 }
 
 server {
@@ -52,8 +51,8 @@ server {
     # generated via url_for, so the X-Forwarded-Prefix trick below
     # doesn't touch them) - served by a separate static-file nginx.
     location ^~ /labfiles/ {
-        proxy_pass http://10.30.70.23/labfiles/;
-        proxy_set_header Host 10.30.70.23;
+        proxy_pass http://{{ labfiles_host }}/labfiles/;
+        proxy_set_header Host {{ labfiles_host }};
     }
 
     # Everything else for a given lab's hardware container. Setting

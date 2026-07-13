@@ -14,17 +14,55 @@ to reverse-engineer them from a running server.
   (then `ln -s` into `sites-enabled/`). Listens on port 8000 (same URL
   users already have: `http://10.30.70.24:8000/`) and splits traffic:
   - `POST /hw/{lab_id}/logout` -> our app (needs the database)
-  - `/labfiles/*` -> CT300's own nginx directly (static lab images)
-  - `/hw/{lab_id}/*` (everything else) -> the matching CT300 hardware
-    container directly, by port (static map inside the file - keep it in
-    sync with `backend/app/main.py::_REAL_LABS` if a lab's port changes
-    or a new lab is added)
+  - `/labfiles/*` -> the shared static-file server directly
+  - `/hw/{lab_id}/*` (everything else) -> the matching hardware
+    container directly, by port
   - everything else -> our app (the SPA and `/api/*`)
+- `nginx-fgpa-remote-lab.conf.j2` + `generate_nginx_config.py` - this
+  file is **generated**, not hand-written. See "Lab catalog" below.
 
-## Applying a change
+## Lab catalog (backend/labs.yaml)
+
+Which labs exist, their hardware address, and which are public used to
+be a Python list in `app/main.py`, hand-copied into this directory's
+nginx config separately - the two drifted out of sync more than once.
+Both now come from one file, `backend/labs.yaml` (see
+`backend/labs.yaml.example` for the annotated format):
+
+- `app/main.py::_seed_labs()` reads it directly to seed the database on
+  first startup (only when the `labs` table is empty - editing this
+  file later does not retroactively change an already-seeded lab row).
+- `deploy/generate_nginx_config.py` reads the same file and renders
+  `nginx-fgpa-remote-lab.conf.j2` into the actual nginx config, turning
+  each lab's `backend_url` into the `lab_id -> host:port` map nginx
+  needs (and `labfiles_host` into the `/labfiles/` proxy target).
+
+To add/remove a lab or change a board's address:
 
 ```bash
-# after editing nginx-fgpa-remote-lab.conf:
+# 1. Edit backend/labs.yaml
+# 2. Regenerate the nginx config from it:
+python3 deploy/generate_nginx_config.py
+# 3. Deploy both sides:
+pct push 210 backend/labs.yaml /opt/fgpa-remote-lab/backend/labs.yaml
+pct push 210 deploy/nginx-fgpa-remote-lab.conf /etc/nginx/sites-available/fgpa-remote-lab
+pct exec 210 -- nginx -t && pct exec 210 -- systemctl reload nginx
+# 4. If the labs table is already seeded, a labs.yaml change doesn't
+#    retroactively apply - update the existing row directly (or via a
+#    future admin-edit endpoint) instead of restarting expecting a re-seed.
+```
+
+A board that doesn't run **labdiscoverylib** (the WebLab-Deusto-
+compatible REST API `app/services/weblab.py` calls) won't actually work
+through Access even with a correct `labs.yaml` entry - this file only
+covers routing/catalog, not the hardware integration protocol itself.
+
+## Applying other changes
+
+```bash
+# after editing nginx-fgpa-remote-lab.conf.j2 (not the .conf directly -
+# see "Lab catalog" above):
+python3 deploy/generate_nginx_config.py
 pct push 210 deploy/nginx-fgpa-remote-lab.conf /etc/nginx/sites-available/fgpa-remote-lab
 pct exec 210 -- nginx -t && pct exec 210 -- systemctl reload nginx
 

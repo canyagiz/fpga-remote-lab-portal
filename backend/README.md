@@ -117,6 +117,18 @@ existing static file, so React Router's client-side routes work on a hard
 refresh. Build the frontend first (see `../frontend/README.md`), then start
 this backend normally - no separate frontend server needed in production.
 
+## Lab catalog (`labs.yaml`)
+
+Which labs exist and where their hardware lives is not hardcoded in
+Python - copy `labs.yaml.example` to `labs.yaml` and edit it for your
+own boards before first startup (`_seed_labs()` reads it to populate an
+empty `labs` table). The same file also drives the nginx hardware-proxy
+routing - see `../deploy/README.md`'s "Lab catalog" section for the
+full loop, including regenerating the nginx config after an edit. Note
+that this only covers routing/catalog metadata - your hardware still
+needs to speak the same protocol `app/services/weblab.py` calls (see
+below) for Access to actually work.
+
 ## Hardware access (CT300)
 
 `GET /api/labs/{id}/access` calls the lab's own hardware container REST

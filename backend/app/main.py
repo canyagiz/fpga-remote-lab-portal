@@ -3,13 +3,16 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import yaml
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import FileResponse
 
 from app.config import settings
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from app.models import Lab
 from app.routers import auth, hardware_proxy, labs, profile, reservations, stats, users
 from app.services.queue import sweep_expired_reservations, sweep_logged_out_sessions
@@ -41,61 +44,59 @@ async def _expiry_sweep_loop():
             db.close()
 
 
-# Metadata mirrors CT200's laboratories.yml/resources.yml (the LabDiscoveryEngine
-# portal this replaces). backend_url points directly at the CT300 hardware
-# containers (network_mode: host, one per board) instead of through CT200's
-# proxy path. Only Arty Z7 is public for now, matching CT200's current
-# live behavior where the other three boards aren't yet exposed.
-_REAL_LABS = [
-    dict(
-        name="Cyclone 10 Lab",
-        description="Access an FPGA board with a Cyclone 10 FPGA for image processing",
-        image_url="/labs/EduPow_CX.jpg",
-        backend_url="http://10.30.70.23:5000",
-        keywords=["fpga", "electronics", "image processing", "cyclone10"],
-        features=["feature1", "feature2"],
-        is_public=False,
-    ),
-    dict(
-        name="Cyclone IV Lab",
-        description="Access an FPGA board with a Cyclone IV FPGA for image processing",
-        image_url="/labs/EduPow_CIV.jpg",
-        backend_url="http://10.30.70.23:5001",
-        keywords=["fpga", "electronics", "image processing", "cyclone4"],
-        features=["feature1", "feature2"],
-        is_public=False,
-    ),
-    dict(
-        name="Cyclone V Lab",
-        description="Access an FPGA board with a Cyclone V FPGA for image processing",
-        image_url="/labs/EduPow_CV.jpg",
-        backend_url="http://10.30.70.23:5002",
-        keywords=["fpga", "electronics", "image processing", "cyclone5"],
-        features=["feature1", "feature2"],
-        is_public=False,
-    ),
-    dict(
-        name="Arty Z7 Lab",
-        description="Access an FPGA board with a Xilinx Zynq-7020 FPGA for image processing",
-        image_url="/labs/EduPow_Z7.png",
-        backend_url="http://10.30.70.23:5003",
-        keywords=["fpga", "electronics", "image processing", "xilinx", "zynq"],
-        features=["feature1", "feature2"],
-        is_public=True,
-        # Self-hosted copy of the prerequisites page (mirrored, not linked
-        # to the external test domain it originally came from) - see
-        # frontend/public/guides/arty-prerequest.html.
-        guide_url="/guides/arty-prerequest.html",
-    ),
-]
+# The lab catalog (which boards exist, their CT300-equivalent
+# addresses, which are public) used to be a hardcoded Python list here,
+# duplicated by hand into the nginx config's lab_id->port map - the two
+# drifted out of sync more than once. Both now derive from the single
+# backend/labs.yaml file instead (see labs.yaml.example for the
+# annotated format, and deploy/generate_nginx_config.py for the nginx
+# side of this).
+_LABS_CONFIG_PATH = Path(__file__).resolve().parent.parent / "labs.yaml"
+
+
+class _LabSeedEntry(BaseModel):
+    id: int
+    name: str
+    description: str
+    image_url: str | None = None
+    backend_url: str | None = None
+    keywords: list[str] | None = None
+    features: list[str] | None = None
+    is_public: bool = False
+    guide_url: str | None = None
+
+
+class _LabCatalogConfig(BaseModel):
+    labfiles_host: str | None = None
+    labs: list[_LabSeedEntry]
+
+
+def _load_lab_catalog() -> list[_LabSeedEntry]:
+    if not _LABS_CONFIG_PATH.is_file():
+        raise RuntimeError(
+            f"{_LABS_CONFIG_PATH} not found - copy labs.yaml.example to labs.yaml and "
+            "edit it for your own hardware before starting the app."
+        )
+    with open(_LABS_CONFIG_PATH) as f:
+        raw = yaml.safe_load(f)
+    return _LabCatalogConfig.model_validate(raw).labs
 
 
 def _seed_labs():
     db = SessionLocal()
     try:
         if db.query(Lab).count() == 0:
-            db.add_all(Lab(**lab_kwargs) for lab_kwargs in _REAL_LABS)
+            entries = _load_lab_catalog()
+            db.add_all(Lab(**entry.model_dump()) for entry in entries)
             db.commit()
+            # The ids above were assigned explicitly (from labs.yaml), not
+            # by Postgres's own auto-increment - bump its sequence past
+            # the highest one so the next admin-created lab doesn't
+            # collide with a seeded id. SQLite (used by tests) has no
+            # such sequence to fix.
+            if engine.dialect.name == "postgresql":
+                db.execute(text("SELECT setval('labs_id_seq', :max_id)"), {"max_id": max(e.id for e in entries)})
+                db.commit()
     finally:
         db.close()
 

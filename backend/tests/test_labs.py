@@ -19,6 +19,21 @@ def _create_lab(client, **overrides):
     return client.post("/api/labs", json=payload).json()["id"]
 
 
+def test_seeded_lab_catalog_comes_from_labs_yaml(client):
+    """The 4 real labs are seeded from backend/labs.yaml on startup (see
+    app/main.py::_load_lab_catalog) - a regression test for that loader,
+    not for any particular lab's content."""
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+
+    labs = client.get("/api/labs").json()
+    assert len(labs) == 4
+    arty = next(lab for lab in labs if lab["name"] == "Arty Z7 Lab")
+    assert arty["is_public"] is True
+    assert arty["guide_url"] == "/guides/arty-prerequest.html"
+    assert sum(1 for lab in labs if lab["is_public"]) == 1
+
+
 def test_list_labs_includes_new_metadata_fields(client):
     lab_id = _create_lab(client, keywords=["fpga", "xilinx"], features=["feature1"])
 
