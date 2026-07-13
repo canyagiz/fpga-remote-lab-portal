@@ -66,6 +66,17 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
 
   const hourLines = Array.from({ length: 25 }, (_, h) => h);
 
+  // 5-minute gridlines for every hour except the hour mark itself (already
+  // drawn by hourLines above, with its own label) - :15/:30/:45 are drawn
+  // heavier so the hour is still readable as a scroll of empty half-hours,
+  // not a featureless gap.
+  const minuteLines: { min: number; quarter: boolean }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 5; m < 60; m += 5) {
+      minuteLines.push({ min: h * 60 + m, quarter: m === 15 || m === 30 || m === 45 });
+    }
+  }
+
   function handleGridClick(e: React.MouseEvent<HTMLDivElement>) {
     // Ignore clicks that bubbled up from a pin.
     if ((e.target as HTMLElement).closest("[data-pin]")) return;
@@ -128,11 +139,25 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
             style={{ height: DAY_MIN * PX_PER_MIN }}
             onClick={handleGridClick}
           >
+            {/* 5-minute gridlines - faint, except :15/:30/:45 which are
+                heavier so an empty hour still reads as a ruled surface
+                rather than a blank gap. */}
+            {minuteLines.map(({ min, quarter }) => (
+              <div
+                key={min}
+                className={
+                  "absolute left-0 right-0 " +
+                  (quarter ? "border-t-2 border-border/60" : "border-t border-border/25")
+                }
+                style={{ top: min * PX_PER_MIN }}
+              />
+            ))}
+
             {/* Hour gridlines + labels */}
             {hourLines.map((h) => (
               <div
                 key={h}
-                className="absolute left-0 right-0 border-t border-border/70"
+                className="absolute left-0 right-0 border-t-2 border-border"
                 style={{ top: h * 60 * PX_PER_MIN }}
               >
                 <span className="absolute -top-2 left-1 bg-card px-1 text-[11px] tabular-nums text-muted-foreground">
@@ -154,26 +179,56 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
               </div>
             )}
 
-            {/* Reservation pins */}
+            {/* Reservation pins - a duration bar from start to end (the
+                real lab session length), capped by a circle at each end,
+                so the timeline shows how long the board is actually
+                occupied instead of a single dot with no sense of extent. */}
             {dayEntries.map(({ e, start, end }, i) => {
               const top = minsSinceMidnight(start) * PX_PER_MIN;
+              const barHeight = Math.max(minsSinceMidnight(end) * PX_PER_MIN - top, 6);
               const isActive = e.status === "active";
               const isOpen = expanded === i;
+              const dot = isActive ? "bg-destructive" : "bg-warning";
               return (
                 <div
                   key={i}
                   data-pin
-                  className="absolute z-30 pl-14"
-                  style={{ top: top - 10 }}
+                  title={`${e.username} (${timeLabel(start)} - ${timeLabel(end)})`}
+                  className="absolute z-30"
+                  style={{ top, height: barHeight }}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     setExpanded(isOpen ? null : i);
                   }}
                 >
-                  {isOpen ? (
+                  {/* Duration bar - offsets are absolute (not padding-
+                      derived): a positioned descendant's `left` is relative
+                      to this container's own edge, not indented by any
+                      padding, so the 56px clearance for the HH:MM labels is
+                      baked into each of these three elements directly. */}
+                  <span
+                    className={"absolute left-16 top-0 w-1 rounded-full " + dot + " opacity-50"}
+                    style={{ height: barHeight }}
+                  />
+                  {/* Start marker */}
+                  <span
+                    className={"absolute left-14 block h-5 w-5 rounded-full border-2 border-card shadow transition-transform hover:scale-125 " + dot}
+                    style={{ top: -10 }}
+                  >
+                    {isActive && (
+                      <span className="absolute inline-flex h-5 w-5 animate-ping rounded-full bg-destructive opacity-60" />
+                    )}
+                  </span>
+                  {/* End marker */}
+                  <span
+                    className={"absolute block h-3 w-3 rounded-full border-2 border-card shadow " + dot}
+                    style={{ top: barHeight - 6, left: 60 }}
+                  />
+
+                  {isOpen && (
                     <div
                       className={
-                        "origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
+                        "absolute left-14 top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
                         (isActive
                           ? "bg-destructive text-destructive-foreground"
                           : "border border-warning bg-warning-muted text-warning-muted-foreground")
@@ -192,18 +247,6 @@ export default function CalendarDay({ labName, labImageUrl, entries, onReserveSl
                         {timeLabel(start)} - {timeLabel(end)}
                       </div>
                     </div>
-                  ) : (
-                    <span
-                      title={`${e.username} (${timeLabel(start)})`}
-                      className={
-                        "block h-5 w-5 rounded-full border-2 border-card shadow transition-transform hover:scale-125 " +
-                        (isActive ? "bg-destructive" : "bg-warning")
-                      }
-                    >
-                      {isActive && (
-                        <span className="absolute inline-flex h-5 w-5 animate-ping rounded-full bg-destructive opacity-60" />
-                      )}
-                    </span>
                   )}
                 </div>
               );

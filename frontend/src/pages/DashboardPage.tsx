@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -222,9 +221,6 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-2xl font-bold tracking-tight">Welcome, {user?.username}</h1>
-      <Link to="/labs" className="mt-1 inline-block text-sm font-medium text-primary hover:underline">
-        Browse labs
-      </Link>
 
       <h2 className="mt-8 mb-3 text-lg font-semibold">My reservations</h2>
       {visible.length === 0 ? (
