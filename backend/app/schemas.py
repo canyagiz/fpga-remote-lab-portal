@@ -1,8 +1,10 @@
 import re
 from datetime import date, datetime, time
 
+import email_validator
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from app.config import settings
 from app.models import LabStatus, ReservationStatus, UserRole
 
 
@@ -24,6 +26,24 @@ class RegisterRequest(BaseModel):
     csrf_token: str
     # Hidden honeypot field: real users never fill this in.
     website: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def email_domain_must_accept_mail(cls, email: str) -> str:
+        # EmailStr above only checks syntax. This is a real DNS MX lookup -
+        # confirmed live that it rejects a domain with no mail exchanger
+        # (e.g. "gmail.co", a plausible typo of gmail.com) while accepting
+        # real ones, closing the gap a syntax-only check leaves: a 2FA
+        # code can never arrive at an address that can't receive mail, so
+        # letting registration succeed anyway just produces an account
+        # that can never be verified.
+        if not settings.verify_email_deliverability:
+            return email
+        try:
+            email_validator.validate_email(email, check_deliverability=True)
+        except email_validator.EmailNotValidError as err:
+            raise ValueError(f"This email address can't receive mail: {err}")
+        return email
 
     @field_validator("password")
     @classmethod

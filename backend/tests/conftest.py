@@ -9,6 +9,11 @@ import os
 # only by the app's old startup create_all recreating empty tables). Setting
 # the env var here wins over .env in pydantic-settings.
 os.environ["DATABASE_URL"] = "sqlite:///./test_fpga_remote_lab.db"
+# Registration's email deliverability check (see schemas.py) does a real
+# DNS MX lookup - tests register with @example.com, a domain IANA
+# reserves specifically to never accept mail, so it would always fail
+# that check. Off here; still on by default everywhere else.
+os.environ["VERIFY_EMAIL_DELIVERABILITY"] = "false"
 
 import pytest
 

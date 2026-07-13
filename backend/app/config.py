@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     two_factor_code_ttl_seconds: int = 300
     registration_rate_limit_window_minutes: int = 15
     registration_rate_limit_max_attempts: int = 5
+    # A real DNS MX-record lookup at registration time (see schemas.py -
+    # RegisterRequest), not just email syntax - catches domains that are
+    # syntactically valid but can't actually receive mail (confirmed live:
+    # "gmail.co" has no MX record and is rejected; "gmail.com"/"h-brs.de"
+    # pass). Off by default in tests (see tests/conftest.py) since it's a
+    # real network call and test addresses use the reserved, deliberately
+    # mail-less example.com domain.
+    verify_email_deliverability: bool = True
 
 
 settings = Settings()
