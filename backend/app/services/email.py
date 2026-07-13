@@ -27,14 +27,69 @@ def send_two_factor_code(to_email: str, username: str, code: str) -> bool:
     expiry_minutes = settings.two_factor_code_ttl_seconds / 60
     expiry_text = f"{expiry_minutes:g} minute{'s' if expiry_minutes != 1 else ''}"
 
-    text_body = f"Hi {username},\n\nYour verification code is: {code}\nIt expires in {expiry_text}."
+    text_body = (
+        f"Hi {username},\n\n"
+        f"Use this verification code to finish signing in: {code}\n"
+        f"It expires in {expiry_text}.\n\n"
+        "If you didn't request this, you can safely ignore this email.\n\n"
+        "- FPGA Remote Lab (H-BRS)"
+    )
+    # Email HTML is deliberately old-school: table-based layout with only
+    # inline styles (no <style> block, no flexbox/grid), because many mail
+    # clients strip <head>/<style> and don't support modern CSS. Colors
+    # mirror the app's theme (indigo primary). No external images - the
+    # server isn't publicly reachable, so a hosted logo wouldn't load; the
+    # brand is set in text instead.
     html_body = f"""
-    <html><body>
-      <p>Hi <strong>{username}</strong>,</p>
-      <p>Your verification code is:</p>
-      <h2>{code}</h2>
-      <p>It expires in {expiry_text}.</p>
-    </body></html>
+    <!doctype html>
+    <html>
+      <body style="margin:0; padding:0; background-color:#f1f5f9;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+               style="background-color:#f1f5f9; padding:32px 12px;">
+          <tr>
+            <td align="center">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="max-width:480px; background-color:#ffffff; border:1px solid #e2e8f0;
+                            border-radius:12px; overflow:hidden;
+                            font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+                <tr>
+                  <td style="background-color:#4f46e5; padding:20px 32px;">
+                    <span style="color:#ffffff; font-size:18px; font-weight:700;">FPGA Remote Lab</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:32px;">
+                    <p style="margin:0 0 8px; font-size:16px; color:#0f172a;">Hi <strong>{username}</strong>,</p>
+                    <p style="margin:0 0 24px; font-size:15px; color:#475569; line-height:1.5;">
+                      Use this verification code to finish signing in:
+                    </p>
+                    <div style="text-align:center; margin:0 0 24px;">
+                      <span style="display:inline-block; background-color:#eef2ff; border:1px solid #c7d2fe;
+                                   border-radius:10px; padding:16px 28px 16px 36px;
+                                   font-family:'Courier New',monospace; font-size:32px; font-weight:700;
+                                   letter-spacing:8px; color:#4338ca;">{code}</span>
+                    </div>
+                    <p style="margin:0 0 4px; font-size:14px; color:#64748b;">
+                      This code expires in <strong>{expiry_text}</strong>.
+                    </p>
+                    <p style="margin:0; font-size:14px; color:#64748b;">
+                      If you didn't request it, you can safely ignore this email.
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:18px 32px; border-top:1px solid #e2e8f0; background-color:#f8fafc;">
+                    <span style="font-size:12px; color:#94a3b8;">
+                      H-BRS FPGA Remote Lab &middot; automated message, please do not reply.
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
     """
     message.attach(MIMEText(text_body, "plain"))
     message.attach(MIMEText(html_body, "html"))
