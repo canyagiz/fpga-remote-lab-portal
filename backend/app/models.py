@@ -67,6 +67,18 @@ class UserProfile(Base):
     # small set of platforms rendered as named fields on the frontend, not
     # an open-ended list, to keep the profile form simple.
     social_links: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
+    # Master switch: when False, GET /api/profile/{username} (the public
+    # view reachable from the Calendar) shows nothing at all, regardless
+    # of hidden_fields below - a private profile isn't "everything hidden
+    # field-by-field", it's a separate, higher-level gate. Defaults True
+    # so existing filled-in profiles don't silently vanish from view the
+    # moment this ships.
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Field-level opt-outs that only take effect while is_public is True -
+    # e.g. ["age", "bio", "social:github"]. Turning is_public off and back
+    # on must NOT reset this list - it's the person's own standing
+    # preference, not something the master switch is allowed to touch.
+    hidden_fields: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="profile")
 

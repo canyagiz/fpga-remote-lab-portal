@@ -1,5 +1,6 @@
 import re
 from datetime import date, datetime, time
+from urllib.parse import urlparse
 
 import email_validator
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -95,23 +96,37 @@ class ProfileOut(BaseModel):
     age: int | None
     bio: str | None
     social_links: dict[str, str] | None
+    # Master share switch and the set of individually-hidden field names -
+    # see models.py::UserProfile for what each means.
+    is_public: bool
+    hidden_fields: list[str] | None
 
     model_config = {"from_attributes": True}
 
 
 class PublicProfileOut(BaseModel):
     # Shown to any other signed-in user (e.g. tapping a name on the
-    # Calendar) - same fields as ProfileOut plus the username itself,
-    # since the caller isn't necessarily looking at their own profile.
+    # Calendar). is_public reflects the owner's master switch - when
+    # False every other field stays at its default (None), regardless of
+    # hidden_fields, which only matters while is_public is True.
     username: str
-    full_name: str | None
-    school: str | None
-    department: str | None
-    age: int | None
-    bio: str | None
-    social_links: dict[str, str] | None
+    is_public: bool
+    full_name: str | None = None
+    school: str | None = None
+    department: str | None = None
+    age: int | None = None
+    bio: str | None = None
+    social_links: dict[str, str] | None = None
 
-    model_config = {"from_attributes": True}
+
+#  hostname(s) a social link under this key must point to - anything not
+# listed here (currently just "website") is unrestricted.
+_SOCIAL_LINK_DOMAINS: dict[str, tuple[str, ...]] = {
+    "linkedin": ("linkedin.com", "www.linkedin.com"),
+    "github": ("github.com", "www.github.com"),
+    "instagram": ("instagram.com", "www.instagram.com"),
+    "x": ("x.com", "www.x.com", "twitter.com", "www.twitter.com"),
+}
 
 
 class ProfileUpdate(BaseModel):
@@ -124,6 +139,33 @@ class ProfileUpdate(BaseModel):
     age: int | None = Field(default=None, ge=14, le=120)
     bio: str | None = Field(default=None, max_length=1000)
     social_links: dict[str, str] | None = None
+    is_public: bool = True
+    hidden_fields: list[str] | None = None
+
+    @field_validator("social_links")
+    @classmethod
+    def social_links_must_point_to_their_own_platform(
+        cls, links: dict[str, str] | None
+    ) -> dict[str, str] | None:
+        # Checked by hostname only, not by fetching/scraping the URL - the
+        # backend never makes an outbound request to a user-supplied URL
+        # (that would be an SSRF hole: a malicious "linkedin" link could
+        # point at an internal address instead). A hostname check can't
+        # catch someone else's real profile URL entered by mistake, but it
+        # does catch the actual reported problem: a GitHub URL parked in
+        # the LinkedIn field, or any link that isn't even a URL.
+        if not links:
+            return links
+        for key, url in links.items():
+            if not url:
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError(f"{key}: '{url}' is not a valid link")
+            allowed = _SOCIAL_LINK_DOMAINS.get(key)
+            if allowed and parsed.netloc.lower() not in allowed:
+                raise ValueError(f"{key} link must point to {allowed[0]}, not {parsed.netloc}")
+        return links
 
 
 class LabOut(BaseModel):

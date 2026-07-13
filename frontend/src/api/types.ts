@@ -68,10 +68,19 @@ export interface Profile {
   age: number | null;
   bio: string | null;
   social_links: Record<string, string> | null;
+  is_public: boolean;
+  hidden_fields: string[] | null;
 }
 
-export interface PublicProfile extends Profile {
+export interface PublicProfile {
   username: string;
+  is_public: boolean;
+  full_name: string | null;
+  school: string | null;
+  department: string | null;
+  age: number | null;
+  bio: string | null;
+  social_links: Record<string, string> | null;
 }
 
 export interface LabUsageStat {

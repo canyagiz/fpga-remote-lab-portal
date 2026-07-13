@@ -4,21 +4,12 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarEntry } from "../api/types";
+import { colorForUsername } from "../lib/colors";
 
-// A stable, distinct color per username (same person always gets the same
-// color, different people almost always get visibly different ones) so a
+// "Currently active" is shown separately via the pulsing ping overlay,
+// not by color - color alone is per-username (colorForUsername) so a
 // card with several bookers reads at a glance instead of everyone being
-// the same one or two status colors. "Currently active" is still shown
-// separately via the pulsing ping overlay, not by color.
-function colorForUsername(username: string): string {
-  let hash = 0;
-  for (let i = 0; i < username.length; i++) {
-    hash = username.charCodeAt(i) + ((hash << 5) - hash);
-    hash |= 0;
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 65%, 42%)`;
-}
+// the same one or two status colors.
 
 // A full local day, 00:00-24:00, drawn as a vertical scrollable strip in
 // 5-minute resolution. 8px/min => 1h = 480px = one full viewport height, so

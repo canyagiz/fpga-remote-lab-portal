@@ -1,12 +1,15 @@
+import { Building, Calendar, ExternalLink, Eye, EyeOff, Lock, User } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import * as api from "../api/client";
 import { Profile } from "../api/types";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { colorForUsername } from "../lib/colors";
 
 const SOCIAL_PLATFORMS: { key: string; label: string; placeholder: string }[] = [
   { key: "linkedin", label: "LinkedIn", placeholder: "https://linkedin.com/in/..." },
@@ -23,7 +26,31 @@ const emptyProfile: Profile = {
   age: null,
   bio: null,
   social_links: null,
+  is_public: true,
+  hidden_fields: null,
 };
+
+// A small "hide this from my profile" toggle used next to every field.
+// Disabled (but never reset) while the master switch is off - see the
+// component's own comment on why toggling the master must not touch
+// these values.
+function FieldVisibilityToggle({
+  hidden,
+  disabledByMaster,
+  onChange,
+}: {
+  hidden: boolean;
+  disabledByMaster: boolean;
+  onChange: (hidden: boolean) => void;
+}) {
+  return (
+    <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+      {hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+      Hide
+      <Switch checked={!hidden} onCheckedChange={(visible) => onChange(!visible)} disabled={disabledByMaster} />
+    </label>
+  );
+}
 
 export default function ProfilePage() {
   const { user } = useAuth();
@@ -51,6 +78,23 @@ export default function ProfilePage() {
     }));
   }
 
+  // hidden_fields is a flat list of field names ("age", "bio", or
+  // "social:github" for an individual link) - toggling one only ever
+  // adds/removes its own entry, never touches is_public or any other
+  // field's entry.
+  function isHidden(fieldKey: string): boolean {
+    return (profile.hidden_fields ?? []).includes(fieldKey);
+  }
+
+  function setHidden(fieldKey: string, hidden: boolean) {
+    setProfile((p) => {
+      const current = new Set(p.hidden_fields ?? []);
+      if (hidden) current.add(fieldKey);
+      else current.delete(fieldKey);
+      return { ...p, hidden_fields: current.size > 0 ? Array.from(current) : null };
+    });
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -73,19 +117,70 @@ export default function ProfilePage() {
 
   if (loading) return <p className="p-6 text-sm text-muted-foreground">Loading...</p>;
 
+  const initial = (profile.full_name || user?.username || "?").trim().charAt(0).toUpperCase();
+  const avatarColor = colorForUsername(user?.username ?? "");
+
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="text-2xl font-bold tracking-tight">Your profile</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {user?.username} &middot; {user?.email}
-      </p>
+      <div className="flex items-center gap-4">
+        <div
+          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-2xl font-bold text-white shadow"
+          style={{ backgroundColor: avatarColor }}
+        >
+          {initial}
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Your profile</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {user?.username} &middot; {user?.email}
+          </p>
+        </div>
+      </div>
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+      {/* Master switch: while off, GET /api/profile/{username} shows nothing
+          at all, regardless of any individual field switch below - those
+          switches stay exactly as set (see setHidden/isHidden), they just
+          stop mattering until sharing is turned back on. */}
+      <Card className="mt-6 border-2" style={{ borderColor: profile.is_public ? undefined : "var(--warning)" }}>
+        <CardContent className="flex items-center justify-between gap-4 py-4">
+          <div className="flex items-center gap-3">
+            {profile.is_public ? (
+              <Eye className="size-5 text-success" />
+            ) : (
+              <Lock className="size-5 text-warning-muted-foreground" />
+            )}
+            <div>
+              <p className="text-sm font-semibold">
+                {profile.is_public ? "Your profile is visible to other users" : "Your profile is private"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {profile.is_public
+                  ? "Anyone signed in can view it (e.g. by tapping your name on the Calendar)."
+                  : "Nobody can view it until you share it again - your field settings below are kept as-is."}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant={profile.is_public ? "outline" : "default"}
+            size="sm"
+            className="shrink-0"
+            onClick={() => updateField("is_public", !profile.is_public)}
+          >
+            {profile.is_public ? "Don't share my profile" : "Share my profile"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <form onSubmit={handleSubmit} className="mt-6 space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">About you</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <User className="size-4.5 text-muted-foreground" />
+              About you
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             <div className="space-y-1.5">
               <Label htmlFor="full_name">Full name</Label>
               <Input
@@ -96,7 +191,16 @@ export default function ProfilePage() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="school">School</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="school" className="flex items-center gap-1.5">
+                    <Building className="size-3.5 text-muted-foreground" /> School
+                  </Label>
+                  <FieldVisibilityToggle
+                    hidden={isHidden("school")}
+                    disabledByMaster={!profile.is_public}
+                    onChange={(h) => setHidden("school", h)}
+                  />
+                </div>
                 <Input
                   id="school"
                   value={profile.school ?? ""}
@@ -105,7 +209,14 @@ export default function ProfilePage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="department">Department</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="department">Department</Label>
+                  <FieldVisibilityToggle
+                    hidden={isHidden("department")}
+                    disabledByMaster={!profile.is_public}
+                    onChange={(h) => setHidden("department", h)}
+                  />
+                </div>
                 <Input
                   id="department"
                   value={profile.department ?? ""}
@@ -115,7 +226,16 @@ export default function ProfilePage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="age">Age</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="age" className="flex items-center gap-1.5">
+                  <Calendar className="size-3.5 text-muted-foreground" /> Age
+                </Label>
+                <FieldVisibilityToggle
+                  hidden={isHidden("age")}
+                  disabledByMaster={!profile.is_public}
+                  onChange={(h) => setHidden("age", h)}
+                />
+              </div>
               <Input
                 id="age"
                 type="number"
@@ -127,7 +247,14 @@ export default function ProfilePage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="bio">Bio</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="bio">Bio</Label>
+                <FieldVisibilityToggle
+                  hidden={isHidden("bio")}
+                  disabledByMaster={!profile.is_public}
+                  onChange={(h) => setHidden("bio", h)}
+                />
+              </div>
               <textarea
                 id="bio"
                 value={profile.bio ?? ""}
@@ -141,12 +268,22 @@ export default function ProfilePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Social media</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ExternalLink className="size-4.5 text-muted-foreground" />
+              Social media
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             {SOCIAL_PLATFORMS.map(({ key, label, placeholder }) => (
               <div key={key} className="space-y-1.5">
-                <Label htmlFor={`social-${key}`}>{label}</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor={`social-${key}`}>{label}</Label>
+                  <FieldVisibilityToggle
+                    hidden={isHidden(`social:${key}`)}
+                    disabledByMaster={!profile.is_public}
+                    onChange={(h) => setHidden(`social:${key}`, h)}
+                  />
+                </div>
                 <Input
                   id={`social-${key}`}
                   value={profile.social_links?.[key] ?? ""}

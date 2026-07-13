@@ -1,9 +1,11 @@
+import { Lock } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import * as api from "../api/client";
 import { PublicProfile } from "../api/types";
 import { useToast } from "../context/ToastContext";
+import { colorForUsername } from "../lib/colors";
 
 const SOCIAL_LABELS: Record<string, string> = {
   linkedin: "LinkedIn",
@@ -42,12 +44,49 @@ export default function UserProfilePage() {
     return <p className="p-6 text-sm text-muted-foreground">No user found with that username.</p>;
   }
 
+  const avatarColor = colorForUsername(profile.username);
+  const initial = (profile.full_name || profile.username).trim().charAt(0).toUpperCase();
+
+  if (!profile.is_public) {
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-10">
+        <div className="flex items-center gap-4">
+          <div
+            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-2xl font-bold text-white shadow"
+            style={{ backgroundColor: avatarColor }}
+          >
+            {initial}
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">@{profile.username}</h1>
+          </div>
+        </div>
+        <Card className="mt-8">
+          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
+            <Lock className="size-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">This user hasn't chosen to share their profile.</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const socialEntries = Object.entries(profile.social_links ?? {}).filter(([, v]) => v);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
-      <h1 className="text-2xl font-bold tracking-tight">{profile.full_name || profile.username}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">@{profile.username}</p>
+      <div className="flex items-center gap-4">
+        <div
+          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-2xl font-bold text-white shadow"
+          style={{ backgroundColor: avatarColor }}
+        >
+          {initial}
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{profile.full_name || profile.username}</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">@{profile.username}</p>
+        </div>
+      </div>
 
       <Card className="mt-8">
         <CardHeader>
