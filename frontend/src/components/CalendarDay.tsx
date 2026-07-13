@@ -5,10 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarEntry } from "../api/types";
 
 // A full local day, 00:00-24:00, drawn as a vertical scrollable strip in
-// 5-minute resolution. 4px/min => 1h = 240px, so the fixed-height viewport
-// below shows ~2h at a time (more legible hour labels, more scrolling -
-// an explicit tradeoff) instead of ~4h.
-const PX_PER_MIN = 4;
+// 5-minute resolution. 8px/min => 1h = 480px = one full viewport height, so
+// the grid shows exactly one hour at a time. This isn't just a zoom
+// preference: a short (e.g. 4-minute) session was only 16px tall at
+// 4px/min, and a pin scheduled just 3-5 minutes out sat close enough to
+// the "Now" line, and close enough to its own rounded/bordered pill
+// edges, that it visually read as overlapping "now" even though the
+// underlying timestamps (verified against the server) were exactly
+// right - there was no timing bug, only too little vertical room to see
+// the real gap.
+const PX_PER_MIN = 8;
 const DAY_MIN = 24 * 60;
 const VIEWPORT_PX = 480;
 const MAX_DAY_OFFSET = 6;
@@ -197,19 +203,19 @@ export default function CalendarDay({ labName, labImageUrl, entries }: CalendarD
                       labels is baked into the value directly. */}
                   <div
                     className={
-                      "absolute left-14 h-full w-3 cursor-pointer rounded-full border-2 border-card shadow transition-transform hover:scale-x-125 " +
+                      "absolute left-14 h-full w-4 cursor-pointer rounded-full border-2 border-card shadow transition-transform hover:scale-x-125 " +
                       fill
                     }
                   >
                     {isActive && (
-                      <span className="absolute inset-x-0 top-0 h-3 animate-ping rounded-full bg-destructive opacity-60" />
+                      <span className="absolute inset-x-0 top-0 h-4 animate-ping rounded-full bg-destructive opacity-60" />
                     )}
                   </div>
 
                   {isOpen && (
                     <div
                       className={
-                        "absolute left-20 top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
+                        "absolute left-[88px] top-0 origin-left animate-in fade-in-0 zoom-in-95 cursor-pointer rounded-lg px-3 py-1.5 shadow-md " +
                         (isActive
                           ? "bg-destructive text-destructive-foreground"
                           : "border border-warning bg-warning-muted text-warning-muted-foreground")
