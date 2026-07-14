@@ -104,8 +104,14 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
       <CardContent className="p-0">
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="username">Username</Label>
-            <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+            <Label htmlFor="username">Username or email</Label>
+            <Input
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+            />
           </div>
 
           <div className="space-y-1.5">

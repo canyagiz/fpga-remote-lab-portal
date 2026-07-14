@@ -245,6 +245,20 @@ def test_login_username_is_case_insensitive(client):
     assert response.status_code == 200
 
 
+def test_login_with_email_instead_of_username(client):
+    register(client, "alice", "alice@example.com")
+
+    response = client.post("/api/auth/login", json={"username": "alice@example.com", "password": "Password123"})
+    assert response.status_code == 200
+
+
+def test_login_with_email_is_case_insensitive(client):
+    register(client, "alice", "alice@example.com")
+
+    response = client.post("/api/auth/login", json={"username": "ALICE@EXAMPLE.COM", "password": "Password123"})
+    assert response.status_code == 200
+
+
 def test_registration_rejects_a_password_without_uppercase(client):
     csrf = client.get("/api/auth/csrf-token").json()["token"]
     question = client.get("/api/auth/captcha").json()["question"]

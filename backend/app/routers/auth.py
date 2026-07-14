@@ -151,10 +151,15 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
 
 @router.post("/login", response_model=LoginResult)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    # Case-insensitive to match the (also case-insensitive) uniqueness
-    # check at registration - otherwise a user who typed "Canyagiz" once
-    # and "canyagiz" another time would be looking for two different rows.
-    user = db.scalar(select(User).where(func.lower(User.username) == payload.username.lower()))
+    # Case-insensitive, and matches either username or email - both are
+    # unique per user (see the matching lower() indexes on User), so
+    # matching on either can never resolve to more than one account.
+    identifier = payload.username.lower()
+    user = db.scalar(
+        select(User).where(
+            (func.lower(User.username) == identifier) | (func.lower(User.email) == identifier)
+        )
+    )
 
     # Deliberately no plaintext fallback here: the old repo accepted
     # `password === stored_value` as a bypass, which was a real backdoor.

@@ -78,6 +78,9 @@ def validate_registration_password(password: str) -> None:
 
 
 class LoginRequest(BaseModel):
+    # Despite the name, this is matched against either username or email
+    # (see routers/auth.py::login) - kept as "username" rather than
+    # renamed to avoid unrelated churn across the frontend/schema/API.
     username: str
     password: str
 
