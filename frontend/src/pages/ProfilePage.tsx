@@ -1,7 +1,9 @@
-import { Building, Calendar, ExternalLink, Eye, EyeOff, Lock, User } from "lucide-react";
+import { Building, Calendar, ExternalLink, Eye, EyeOff, Lock, Trash2, User } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -53,11 +55,35 @@ function FieldVisibilityToggle({
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { showError, showSuccess } = useToast();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDeleteAccount() {
+    if (!deletePassword) return;
+    setDeleting(true);
+    try {
+      await api.deleteMyAccount(deletePassword);
+      // Session is already cleared server-side; drop client auth state and
+      // leave. logout() also pings /api/auth/logout, which is harmless.
+      try {
+        await logout();
+      } catch {
+        /* already signed out server-side */
+      }
+      showSuccess("Your account has been deleted");
+      navigate("/");
+    } catch (err) {
+      showError(err instanceof api.ApiError ? err.message : "Failed to delete account");
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     api
@@ -301,6 +327,74 @@ export default function ProfilePage() {
           </Button>
         </div>
       </form>
+
+      {/* Danger zone */}
+      <Card className="mt-8 border-2" style={{ borderColor: "var(--destructive)" }}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Trash2 className="h-5 w-5" style={{ color: "var(--destructive)" }} />
+            Delete account
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            Permanently delete your account and all of your data, including your reservation history. This
+            cannot be undone.
+          </p>
+          <Button
+            type="button"
+            variant="destructive"
+            className="shrink-0"
+            onClick={() => {
+              setDeletePassword("");
+              setDeleteOpen(true);
+            }}
+          >
+            Delete account
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!deleting) setDeleteOpen(open);
+        }}
+      >
+        <DialogContent>
+          <h2 className="text-lg font-semibold">Delete your account?</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This permanently deletes your account, profile, and all reservation history. Enter your password
+            to confirm.
+          </p>
+          <div className="mt-4 space-y-2">
+            <Label htmlFor="delete-password">Password</Label>
+            <Input
+              id="delete-password"
+              type="password"
+              value={deletePassword}
+              autoComplete="current-password"
+              onChange={(e) => setDeletePassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleDeleteAccount();
+              }}
+            />
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button type="button" variant="secondary" disabled={deleting} onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting || !deletePassword}
+              onClick={handleDeleteAccount}
+            >
+              {deleting ? "Deleting…" : "Delete account"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

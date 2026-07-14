@@ -352,3 +352,10 @@ class AdminEntry(BaseModel):
 
 class GrantAdminRequest(BaseModel):
     email: str = Field(min_length=3, max_length=100)
+
+
+class DeleteAccountRequest(BaseModel):
+    # Re-entered to confirm identity before an irreversible delete - the
+    # session cookie alone is a ~30-day sliding window, so an abandoned
+    # open session shouldn't be enough to wipe the account.
+    password: str

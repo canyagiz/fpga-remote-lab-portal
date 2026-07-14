@@ -125,6 +125,11 @@ export const getMyStats = () => get<MyStats>("/api/stats/me");
 
 export const getMyProfile = () => get<Profile>("/api/profile");
 export const updateMyProfile = (data: Profile) => put<Profile>("/api/profile", data);
+export const deleteMyAccount = (password: string) =>
+  request<MessageResponse>("/api/profile", {
+    method: "DELETE",
+    body: JSON.stringify({ password }),
+  });
 export const getUserProfile = (username: string) =>
   get<PublicProfile>(`/api/profile/${encodeURIComponent(username)}`);
 
