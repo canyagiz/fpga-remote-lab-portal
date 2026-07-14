@@ -1,4 +1,7 @@
 import {
+  AdminEntry,
+  AdminUserDetail,
+  AdminUserSummary,
   ApiError,
   CalendarEntry,
   CaptchaResponse,
@@ -125,9 +128,14 @@ export const updateMyProfile = (data: Profile) => put<Profile>("/api/profile", d
 export const getUserProfile = (username: string) =>
   get<PublicProfile>(`/api/profile/${encodeURIComponent(username)}`);
 
-// --- users (admin) ---
+// --- admin panel ---
 
-export const getUsers = () => get<User[]>("/api/users");
-export const deleteUser = (id: number) => del<MessageResponse>(`/api/users/${id}`);
+export const getAdminUsers = () => get<AdminUserSummary[]>("/api/admin/users");
+export const getAdminUserDetail = (id: number) => get<AdminUserDetail>(`/api/admin/users/${id}`);
+export const deleteAdminUser = (id: number) => del<MessageResponse>(`/api/admin/users/${id}`);
+export const getAdmins = () => get<AdminEntry[]>("/api/admin/admins");
+export const grantAdmin = (email: string) => post<MessageResponse>("/api/admin/admins", { email });
+export const revokeAdmin = (email: string) =>
+  del<MessageResponse>(`/api/admin/admins/${encodeURIComponent(email)}`);
 
 export { ApiError };

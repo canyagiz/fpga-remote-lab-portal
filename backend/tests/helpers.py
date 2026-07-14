@@ -57,13 +57,20 @@ def login(client, username, password="Password123"):
 
 
 def make_admin(username):
+    """Grant admin the same way the app does - a row in admin_emails, not
+    just a raw role flip. The role is now a projection of the allowlist
+    (config + admin_emails), re-synced on every login, so a bare role=admin
+    would be undone the next time this account logs in.
+    """
     from app.database import SessionLocal
-    from app.models import User, UserRole
+    from app.models import AdminEmail, User, UserRole
 
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
         user.role = UserRole.admin
+        if db.query(AdminEmail).filter(AdminEmail.email == user.email).first() is None:
+            db.add(AdminEmail(email=user.email, added_by_user_id=user.id))
         db.commit()
     finally:
         db.close()

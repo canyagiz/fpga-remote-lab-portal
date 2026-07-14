@@ -24,6 +24,7 @@ from app.schemas import (
     validate_registration_username,
 )
 from app.security import generate_two_factor_code, hash_password, mask_email, verify_password
+from app.services.admin import sync_user_role
 from app.services.email import send_two_factor_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -131,6 +132,10 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         password_hash=hash_password(payload.password),
     )
     db.add(user)
+    # Promote immediately if this address is on the admin allowlist (root
+    # config email, or one an admin pre-authorized before this person
+    # registered) - see services/admin.py.
+    sync_user_role(db, user)
     try:
         db.commit()
     except IntegrityError:
@@ -177,6 +182,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         )
 
     request.session["user_id"] = user.id
+    sync_user_role(db, user)
     db.add(LoginEvent(user_id=user.id))
     db.commit()
     return LoginResult(success=True, require_2fa=False)
@@ -206,6 +212,7 @@ def verify_two_factor(payload: Verify2FARequest, request: Request, db: Session =
     # verification turns it off for this account; future logins skip
     # straight through.
     user.two_factor_enabled = False
+    sync_user_role(db, user)
     # This is the moment a 2FA login actually succeeds - the sign-in is
     # recorded here, not in /login (which only sent the code).
     db.add(LoginEvent(user_id=user.id))

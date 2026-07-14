@@ -282,3 +282,73 @@ class CalendarEntryOut(BaseModel):
     status: ReservationStatus
     start_time: datetime
     end_time: datetime
+
+
+# ---- Admin panel ------------------------------------------------------
+
+class AdminUserSummary(BaseModel):
+    """One row in the admin members table."""
+
+    id: int
+    username: str
+    email: str
+    role: UserRole
+    created_at: datetime
+    # Whether this address is a config-level root admin (Andrea / Yagiz) -
+    # the frontend uses it to hide the demote/delete controls, and the
+    # backend refuses those operations regardless.
+    is_root_admin: bool
+    # Distinct labs the user has at least one completed session on, and the
+    # total number of completed sessions across all labs.
+    completed_labs: int
+    completed_sessions: int
+    total_reservations: int
+    has_profile: bool
+
+
+class AdminReservationOut(BaseModel):
+    id: int
+    lab_id: int
+    lab_name: str
+    status: ReservationStatus
+    reservation_date: date | None
+    reservation_time: time | None
+    created_at: datetime
+    usage_start_time: datetime | None
+    usage_end_time: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class AdminUserDetail(BaseModel):
+    """Full drill-down for one member: identity, the profile fields they
+    filled in (admins see everything, ignoring the public/hidden switches
+    that only gate peer-to-peer viewing), and their whole reservation
+    history."""
+
+    id: int
+    username: str
+    email: str
+    role: UserRole
+    created_at: datetime
+    is_root_admin: bool
+    profile: ProfileOut | None
+    reservations: list[AdminReservationOut]
+
+
+class AdminEntry(BaseModel):
+    """One entry in the admin-management list - a root config admin or a
+    runtime-granted one, whether or not a matching account exists yet."""
+
+    email: str
+    is_root_admin: bool
+    # True once someone has actually registered with this address; a
+    # granted-but-unregistered admin shows as pending until then.
+    is_registered: bool
+    user_id: int | None
+    username: str | None
+    granted_at: datetime | None
+
+
+class GrantAdminRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=100)

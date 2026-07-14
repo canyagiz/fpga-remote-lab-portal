@@ -14,7 +14,8 @@ from starlette.responses import FileResponse
 from app.config import settings
 from app.database import SessionLocal, engine
 from app.models import Lab
-from app.routers import auth, hardware_proxy, labs, profile, reservations, stats, users
+from app.routers import admin, auth, hardware_proxy, labs, profile, reservations, stats
+from app.services.admin import sync_all_admin_roles
 from app.services.queue import sweep_expired_reservations, sweep_logged_out_sessions
 
 logger = logging.getLogger("fpga_remote_lab")
@@ -111,6 +112,14 @@ async def lifespan(app: FastAPI):
     # table is already populated. Tests build their own schema directly (see
     # tests/conftest.py) instead of going through Alembic.
     _seed_labs()
+    # Promote/demote existing accounts to match the admin allowlist (config
+    # root admins + granted admin_emails rows) so an allowlist change takes
+    # effect on deploy without each user having to log in again.
+    _db = SessionLocal()
+    try:
+        sync_all_admin_roles(_db)
+    finally:
+        _db.close()
     sweep_task = asyncio.create_task(_expiry_sweep_loop())
     yield
     sweep_task.cancel()
@@ -136,7 +145,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(labs.router, prefix="/api")
 app.include_router(reservations.router, prefix="/api")
-app.include_router(users.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 

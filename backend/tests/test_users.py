@@ -12,7 +12,7 @@ def test_list_users_requires_admin(client):
     register(client, "alice", "alice@example.com")
     login(client, "alice")
 
-    response = client.get("/api/users")
+    response = client.get("/api/admin/users")
     assert response.status_code == 403
 
 
@@ -20,7 +20,7 @@ def test_admin_can_list_users(client):
     _make_admin_session(client)
     register(client, "alice", "alice@example.com")
 
-    response = client.get("/api/users")
+    response = client.get("/api/admin/users")
     assert response.status_code == 200
     usernames = {u["username"] for u in response.json()}
     assert {"admin", "alice"} <= usernames
@@ -40,7 +40,7 @@ def test_delete_user_requires_admin(client):
     finally:
         db.close()
 
-    response = client.delete(f"/api/users/{bob_id}")
+    response = client.delete(f"/api/admin/users/{bob_id}")
     assert response.status_code == 403
 
 
@@ -66,7 +66,7 @@ def test_admin_can_delete_a_user_even_with_2fa_codes(client):
 
     client.cookies.clear()
     login(client, "admin")
-    response = client.delete(f"/api/users/{bob_id}")
+    response = client.delete(f"/api/admin/users/{bob_id}")
     assert response.status_code == 200
 
     db = SessionLocal()
@@ -89,7 +89,7 @@ def test_admin_cannot_delete_own_account(client):
     finally:
         db.close()
 
-    response = client.delete(f"/api/users/{admin_id}")
+    response = client.delete(f"/api/admin/users/{admin_id}")
     assert response.status_code == 400
 
 
@@ -115,5 +115,5 @@ def test_cannot_delete_user_with_reservation_history(client):
 
     client.cookies.clear()
     login(client, "admin")
-    response = client.delete(f"/api/users/{bob_id}")
+    response = client.delete(f"/api/admin/users/{bob_id}")
     assert response.status_code == 409

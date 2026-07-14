@@ -111,7 +111,7 @@ class Reservation(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     # No ondelete=CASCADE here on purpose: reservation history is an audit
     # trail of lab usage, so deleting a user with past reservations should
-    # fail loudly (see routers/users.py::delete_user) rather than silently
+    # fail loudly (see routers/admin.py::delete_member) rather than silently
     # erasing that history.
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     lab_id: Mapped[int] = mapped_column(ForeignKey("labs.id"))
@@ -169,3 +169,33 @@ class LoginEvent(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AdminEmail(Base):
+    """An email granted admin rights at runtime by an existing admin.
+
+    The full admin set is this table UNION settings.admin_emails (the
+    immutable root admins in config, which are never stored here). An
+    entry may point at a not-yet-registered address: when that person
+    registers or logs in, services/admin.py::sync_user_role promotes
+    them automatically. Removing a row here revokes the grant (and demotes
+    the matching user, if any) - but the config root admins can't be
+    revoked, so the panel can never lock itself out.
+    """
+
+    __tablename__ = "admin_emails"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(100))
+    # Who granted it (null for anything seeded/system-added). SET NULL so
+    # deleting the granting admin doesn't erase the grant record.
+    added_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        # Case-insensitive uniqueness, same pattern as users.email - one
+        # grant per address regardless of how it was typed.
+        Index("ix_admin_emails_email_lower", func.lower(email), unique=True),
+    )

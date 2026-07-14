@@ -110,6 +110,51 @@ export interface CalendarEntry {
   end_time: string;
 }
 
+export interface AdminUserSummary {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+  is_root_admin: boolean;
+  completed_labs: number;
+  completed_sessions: number;
+  total_reservations: number;
+  has_profile: boolean;
+}
+
+export interface AdminReservation {
+  id: number;
+  lab_id: number;
+  lab_name: string;
+  status: ReservationStatus;
+  reservation_date: string | null;
+  reservation_time: string | null;
+  created_at: string;
+  usage_start_time: string | null;
+  usage_end_time: string | null;
+}
+
+export interface AdminUserDetail {
+  id: number;
+  username: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+  is_root_admin: boolean;
+  profile: Profile | null;
+  reservations: AdminReservation[];
+}
+
+export interface AdminEntry {
+  email: string;
+  is_root_admin: boolean;
+  is_registered: boolean;
+  user_id: number | null;
+  username: string | null;
+  granted_at: string | null;
+}
+
 export class ApiError extends Error {
   status: number;
 

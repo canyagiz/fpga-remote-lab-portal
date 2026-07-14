@@ -38,7 +38,7 @@ export default function Navbar() {
             </Link>
             {user.role === "admin" && (
               <Link to="/admin/users" className="font-medium text-muted-foreground hover:text-foreground">
-                Users
+                Admin
               </Link>
             )}
             <Link

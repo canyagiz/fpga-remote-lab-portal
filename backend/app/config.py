@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     weblab_username: str = ""
     weblab_password: str = ""
 
+    # Root administrators, by email. Anyone who registers/logs in with one
+    # of these addresses is always an admin and can never be demoted or
+    # deleted through the panel - the email itself is the credential (you
+    # can't complete first-login for an address without receiving its 2FA
+    # code). Additional admins are granted at runtime by an existing admin
+    # and live in the admin_emails table; these two are the immutable
+    # bootstrap set so the panel can never be locked out. Override via a
+    # JSON list in .env (ADMIN_EMAILS='["a@x.com","b@y.com"]') if needed.
+    admin_emails: list[str] = [
+        "Andrea.Schwandt@h-brs.de",
+        "aliyagiz.caniguroglu@gmail.com",
+    ]
+
     # 1 minute (the old repo's value) is too tight in practice - it barely
     # survives the time it takes to switch to a mail client and back, let
     # alone the current Mailpit lookup workflow before real SMTP is wired

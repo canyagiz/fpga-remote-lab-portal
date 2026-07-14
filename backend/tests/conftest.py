@@ -14,6 +14,11 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_fpga_remote_lab.db"
 # reserves specifically to never accept mail, so it would always fail
 # that check. Off here; still on by default everywhere else.
 os.environ["VERIFY_EMAIL_DELIVERABILITY"] = "false"
+# Deterministic root-admin allowlist for the tests, so they don't depend on
+# the real Andrea/Yagiz addresses baked into config.py's defaults. Anyone
+# registering with root@example.com is auto-promoted (see
+# services/admin.py). Parsed as a JSON list by pydantic-settings.
+os.environ["ADMIN_EMAILS"] = '["root@example.com"]'
 
 import pytest
 
