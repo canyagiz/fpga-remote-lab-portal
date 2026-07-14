@@ -135,7 +135,8 @@ export const getUserProfile = (username: string) =>
 
 export const getAdminUsers = () => get<AdminUserSummary[]>("/api/admin/users");
 export const getAdminUserDetail = (id: number) => get<AdminUserDetail>(`/api/admin/users/${id}`);
-export const deleteAdminUser = (id: number) => del<MessageResponse>(`/api/admin/users/${id}`);
+export const deleteAdminUser = (id: number, force = false) =>
+  del<MessageResponse>(`/api/admin/users/${id}${force ? "?force=true" : ""}`);
 export const getAdmins = () => get<AdminEntry[]>("/api/admin/admins");
 export const grantAdmin = (email: string) => post<MessageResponse>("/api/admin/admins", { email });
 export const revokeAdmin = (email: string) =>

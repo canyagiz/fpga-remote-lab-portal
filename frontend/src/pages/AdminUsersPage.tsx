@@ -71,7 +71,25 @@ export default function AdminUsersPage() {
       showSuccess(`Deleted ${u.username}`);
       await refresh();
     } catch (err) {
-      showError(err instanceof api.ApiError ? err.message : "Failed to delete user");
+      if (err instanceof api.ApiError && err.status === 409) {
+        // Has reservation history - ask again, explicitly, before nuking it.
+        const count = u.total_reservations;
+        const proceed = confirm(
+          `${u.username} has ${count} reservation${count === 1 ? "" : "s"} on record. ` +
+            `Deleting anyway permanently erases that history too. Continue?`,
+        );
+        if (proceed) {
+          try {
+            await api.deleteAdminUser(u.id, true);
+            showSuccess(`Deleted ${u.username} and their reservation history`);
+            await refresh();
+          } catch (err2) {
+            showError(err2 instanceof api.ApiError ? err2.message : "Failed to delete user");
+          }
+        }
+      } else {
+        showError(err instanceof api.ApiError ? err.message : "Failed to delete user");
+      }
     } finally {
       setBusy(null);
     }

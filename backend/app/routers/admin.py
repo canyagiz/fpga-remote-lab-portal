@@ -1,3 +1,6 @@
+import logging
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -24,8 +27,10 @@ from app.schemas import (
     ProfileOut,
 )
 from app.services.admin import is_admin_email, is_root_admin_email, sync_user_role
+from app.services.weblab import close_weblab_session
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
+logger = logging.getLogger("fpga_remote_lab")
 
 
 # ---- Members ----------------------------------------------------------
@@ -122,7 +127,19 @@ def member_detail(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/users/{user_id}", response_model=MessageOut)
-def delete_member(user_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+def delete_member(
+    user_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Delete a member. Reservations deliberately don't cascade (they're
+    an audit trail) - by default this fails loudly (409) rather than
+    silently erasing a user's usage history. Pass force=true (the admin
+    panel does this after an explicit confirmation showing the session
+    count) to delete the history along with the account, same as a user
+    deleting their own account - see routers/profile.py::delete_my_account,
+    which this mirrors."""
     if user_id == admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own account")
 
@@ -136,12 +153,24 @@ def delete_member(user_id: int, db: Session = Depends(get_db), admin: User = Dep
             detail="Cannot delete a root administrator",
         )
 
+    if force:
+        reservations = db.scalars(select(Reservation).where(Reservation.user_id == user_id)).all()
+        for reservation in reservations:
+            if reservation.status == ReservationStatus.active and reservation.weblab_session_url:
+                try:
+                    close_weblab_session(reservation.lab, reservation.weblab_session_url)
+                except httpx.HTTPError:
+                    logger.warning(
+                        "Could not close hardware session for reservation %d while force-deleting user %d",
+                        reservation.id,
+                        user_id,
+                    )
+            db.delete(reservation)
+
     db.delete(user)
     try:
         db.commit()
     except IntegrityError:
-        # Reservations deliberately don't cascade (audit trail) - deleting
-        # a user with history fails loudly instead of erasing it.
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

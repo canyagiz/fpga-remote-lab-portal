@@ -117,3 +117,41 @@ def test_cannot_delete_user_with_reservation_history(client):
     login(client, "admin")
     response = client.delete(f"/api/admin/users/{bob_id}")
     assert response.status_code == 409
+
+
+def test_admin_can_force_delete_a_user_with_reservation_history(client):
+    lab_id = None
+    _make_admin_session(client)
+
+    lab_id = client.post("/api/labs", json={"name": "Arty Z7", "description": "FPGA board"}).json()["id"]
+
+    register(client, "bob", "bob@example.com")
+    login(client, "bob")
+    reservation = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
+    assert reservation["status"] == "active"
+
+    from app.database import SessionLocal
+    from app.models import Reservation, User
+
+    db = SessionLocal()
+    try:
+        bob_id = db.query(User).filter(User.username == "bob").first().id
+    finally:
+        db.close()
+
+    client.cookies.clear()
+    login(client, "admin")
+
+    # without force, still blocked (unchanged behavior)
+    assert client.delete(f"/api/admin/users/{bob_id}").status_code == 409
+
+    # with force, the account and its history are both removed
+    response = client.delete(f"/api/admin/users/{bob_id}?force=true")
+    assert response.status_code == 200, response.text
+
+    db = SessionLocal()
+    try:
+        assert db.get(User, bob_id) is None
+        assert db.query(Reservation).filter(Reservation.user_id == bob_id).count() == 0
+    finally:
+        db.close()
