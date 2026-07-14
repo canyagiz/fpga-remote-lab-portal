@@ -1,7 +1,7 @@
 # CT210's live lab catalog - the single source of truth for both the
 # database seed (app/main.py::_load_lab_catalog) and the nginx
 # hardware-proxy routing (deploy/generate_nginx_config.py renders
-# deploy/nginx-fgpa-remote-lab.conf.j2 from this file). See
+# deploy/nginx-fpga-remote-lab.conf.j2 from this file). See
 # labs.yaml.example for the annotated version of this same format,
 # meant for a fresh deployment on different hardware.
 #

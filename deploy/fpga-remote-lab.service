@@ -1,6 +1,6 @@
-# /etc/systemd/system/fgpa-remote-lab.service on CT210
+# /etc/systemd/system/fpga-remote-lab.service on CT210
 #
-# Internal-only: nginx (see nginx-fgpa-remote-lab.conf) is the public
+# Internal-only: nginx (see nginx-fpga-remote-lab.conf) is the public
 # entry point on port 8000 and reverse-proxies everything except
 # hardware-lab traffic to this on 127.0.0.1:8001.
 [Unit]
@@ -9,8 +9,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/fgpa-remote-lab/backend
-ExecStart=/opt/fgpa-remote-lab/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
+WorkingDirectory=/opt/fpga-remote-lab/backend
+ExecStart=/opt/fpga-remote-lab/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=3
 User=root

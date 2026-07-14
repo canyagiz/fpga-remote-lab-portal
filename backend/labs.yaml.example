@@ -1,7 +1,7 @@
 # The lab catalog for this deployment - the single source of truth for
 # both the database seed (see app/main.py::_load_lab_catalog) and the
 # nginx hardware-proxy routing (see deploy/generate_nginx_config.py,
-# which renders deploy/nginx-fgpa-remote-lab.conf.j2 from this file).
+# which renders deploy/nginx-fpga-remote-lab.conf.j2 from this file).
 # Editing IPs/ports/labs here and re-running that script is now the
 # only place this information lives - it used to be hardcoded in
 # app/main.py AND hand-copied into the nginx config separately, which

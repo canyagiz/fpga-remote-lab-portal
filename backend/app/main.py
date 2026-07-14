@@ -142,7 +142,7 @@ app.include_router(stats.router, prefix="/api")
 
 # Not under /api: nginx now reverse-proxies /hw/{lab_id}/* and
 # /labfiles/* straight to CT300 itself (see
-# /etc/nginx/sites-available/fgpa-remote-lab on CT210), except for this
+# /etc/nginx/sites-available/fpga-remote-lab on CT210), except for this
 # one path - the in-lab "Log out" button needs our own database, so
 # nginx carves POST /hw/{lab_id}/logout out to us specifically. Still
 # registered before the SPA catch-all below so it takes precedence.

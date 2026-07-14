@@ -31,7 +31,7 @@ def start_weblab_session(lab: Lab, user: User, duration_seconds: int, back_url: 
         json={
             "request": {
                 "locale": "en",
-                "ldeReservationId": f"fgpa-remote-lab-{user.id}-{lab.id}-{int(now.timestamp())}",
+                "ldeReservationId": f"fpga-remote-lab-{user.id}-{lab.id}-{int(now.timestamp())}",
                 "user": {},
                 "server": {},
                 "backUrl": back_url,

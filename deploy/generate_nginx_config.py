@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render nginx-fgpa-remote-lab.conf.j2 using backend/labs.yaml.
+"""Render nginx-fpga-remote-lab.conf.j2 using backend/labs.yaml.
 
 backend/labs.yaml is the single source of truth for which labs exist and
 where their hardware lives; this script is the other half of that - it
@@ -10,7 +10,7 @@ Usage (from anywhere):
     python3 deploy/generate_nginx_config.py
 
 Then, on the server:
-    pct push 210 deploy/nginx-fgpa-remote-lab.conf /etc/nginx/sites-available/fgpa-remote-lab
+    pct push 210 deploy/nginx-fpga-remote-lab.conf /etc/nginx/sites-available/fpga-remote-lab
     pct exec 210 -- nginx -t && pct exec 210 -- systemctl reload nginx
 """
 
@@ -24,8 +24,8 @@ from jinja2 import Environment, FileSystemLoader
 _DEPLOY_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _DEPLOY_DIR.parent
 _LABS_YAML = _REPO_ROOT / "backend" / "labs.yaml"
-_TEMPLATE_NAME = "nginx-fgpa-remote-lab.conf.j2"
-_OUTPUT_PATH = _DEPLOY_DIR / "nginx-fgpa-remote-lab.conf"
+_TEMPLATE_NAME = "nginx-fpga-remote-lab.conf.j2"
+_OUTPUT_PATH = _DEPLOY_DIR / "nginx-fpga-remote-lab.conf"
 
 
 def _host_port(backend_url: str, lab_name: str) -> str:

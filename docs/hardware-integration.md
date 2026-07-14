@@ -34,7 +34,7 @@ Called once per reservation, the first time a user clicks *Access*
 {
   "request": {
     "locale": "en",
-    "ldeReservationId": "fgpa-remote-lab-<user_id>-<lab_id>-<unix_ts>",
+    "ldeReservationId": "fpga-remote-lab-<user_id>-<lab_id>-<unix_ts>",
     "user": {},
     "server": {},
     "backUrl": "https://.../labs"
