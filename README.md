@@ -24,3 +24,11 @@ deploy/    nginx + systemd configs used on CT210 - see deploy/README.md
 The backend serves the built frontend directly (same origin, no separate
 frontend server in production) - see "Serving the frontend" in
 `backend/README.md`.
+
+## License
+
+MIT, with a Branding & Attribution Requirement - see [`LICENSE`](LICENSE).
+In short: the FPGA Vision Remote Lab and Hochschule Bonn-Rhein-Sieg logos in
+the navbar may not be removed or altered in any deployment, and the "In
+partnership with" list on the landing page is append-only - see
+[`frontend/src/config/partners.ts`](frontend/src/config/partners.ts).

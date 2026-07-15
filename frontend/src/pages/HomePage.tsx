@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import HeroVideo from "../components/HeroVideo";
 import { useAuth } from "../context/AuthContext";
+import { partners } from "../config/partners";
 
 export default function HomePage() {
   const { user } = useAuth();
@@ -26,11 +27,19 @@ export default function HomePage() {
           </div>
         )}
 
-        <div className="mt-16 flex items-center justify-center gap-5">
+        {/* LICENSE (Branding & Attribution Requirement, item 2): entries here
+            are additive only - see src/config/partners.ts. */}
+        <div className="mt-16 flex flex-wrap items-center justify-center gap-5">
           <span className="text-base uppercase tracking-wide text-muted-foreground">In partnership with</span>
-          <a href="https://www.h-brs.de/de" target="_blank" rel="noopener noreferrer">
-            <img src="/bonn-logo.png" alt="Hochschule Bonn-Rhein-Sieg" className="h-20 w-auto" />
-          </a>
+          {partners.map((partner) => (
+            <a key={partner.name} href={partner.url} target="_blank" rel="noopener noreferrer">
+              <img
+                src={partner.logo}
+                alt={partner.name}
+                className={partner.logoClassName ?? "h-20 w-auto"}
+              />
+            </a>
+          ))}
         </div>
       </section>
 

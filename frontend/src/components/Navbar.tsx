@@ -15,6 +15,10 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-7 py-1.5">
+      {/* LICENSE (Branding & Attribution Requirement, item 1): the FPGA
+          Vision Remote Lab logo and the Hochschule Bonn-Rhein-Sieg logo
+          below must not be removed, replaced, resized down, or hidden in
+          any deployment. */}
       <div className="flex items-center gap-4">
         <Link to="/">
           <img src="/logo.png" alt="FPGA Remote Lab" className="h-16 w-auto" />
