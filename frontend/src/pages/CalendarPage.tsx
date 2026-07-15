@@ -34,14 +34,14 @@ export default function CalendarPage() {
   const bookableLabs = labs.filter((l) => l.is_public);
 
   return (
-    <div className="mx-auto max-w-xl px-6 py-10">
+    <div className="mx-auto max-w-6xl px-6 py-10">
       <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
       <p className="mt-1 text-sm text-muted-foreground">Who has each board, and when - by username only.</p>
 
       {bookableLabs.length === 0 ? (
         <p className="mt-8 text-sm text-muted-foreground">No bookable boards available yet.</p>
       ) : (
-        <div className="mt-8 space-y-6">
+        <div className="mt-8 grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
           {bookableLabs.map((lab) => (
             <CalendarDay
               key={lab.id}
