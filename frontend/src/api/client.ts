@@ -55,7 +55,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch {
       // Response body wasn't JSON - fall back to the status text above.
     }
-    throw new ApiError(response.status, detail);
+    const retryAfter = response.headers.get("Retry-After");
+    throw new ApiError(response.status, detail, retryAfter ? Number(retryAfter) : undefined);
   }
 
   if (response.status === 204) {

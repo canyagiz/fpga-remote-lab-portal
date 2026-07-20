@@ -7,6 +7,7 @@ import { ApiError, getCaptcha, getCsrfToken, register } from "../api/client";
 import { CaptchaResponse } from "../api/types";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
+import { useResendCooldown } from "../lib/useResendCooldown";
 import PasswordInput from "./PasswordInput";
 import PasswordStrength from "./PasswordStrength";
 import PuzzleCaptcha from "./PuzzleCaptcha";
@@ -20,6 +21,7 @@ interface RegisterFormProps {
 export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFormProps) {
   const { verify2FA, resend2FA } = useAuth();
   const { showError, showSuccess } = useToast();
+  const resendCooldown = useResendCooldown();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -112,6 +114,9 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
       await resend2FA();
       showSuccess("A new code has been sent.");
     } catch (err) {
+      if (err instanceof ApiError && err.retryAfterSeconds) {
+        resendCooldown.start(err.retryAfterSeconds);
+      }
       showError(err instanceof ApiError ? err.message : "Failed to resend code");
     }
   }
@@ -142,8 +147,13 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
               Verify
             </Button>
           </form>
-          <Button variant="link" className="mt-3 h-auto p-0" onClick={handleResend}>
-            Resend code
+          <Button
+            variant="link"
+            className="mt-3 h-auto p-0"
+            onClick={handleResend}
+            disabled={resendCooldown.secondsLeft > 0}
+          >
+            {resendCooldown.secondsLeft > 0 ? `Resend code (${resendCooldown.label})` : "Resend code"}
           </Button>
         </CardContent>
       </>

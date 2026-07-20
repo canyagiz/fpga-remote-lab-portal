@@ -163,9 +163,14 @@ export interface AdminEntry {
 
 export class ApiError extends Error {
   status: number;
+  // Set from the response's Retry-After header when present (e.g. the
+  // registration and resend-2fa rate limits) so callers can drive a live
+  // countdown instead of just showing the static message once.
+  retryAfterSeconds?: number;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, retryAfterSeconds?: number) {
     super(message);
     this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
