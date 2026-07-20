@@ -41,6 +41,23 @@ def _format_wait_text(wait_seconds: int) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def _two_factor_cooldown_remaining(db: Session, user_id: int) -> int:
+    """Seconds until another 2FA code may be sent to this user, or 0 if
+    none is currently pending. Single source of truth for the cooldown -
+    used both by resend-2fa (to reject early) and by login (to avoid
+    firing a second email instead of just re-showing the code prompt) -
+    so closing the verification dialog and signing in again can't be used
+    to route around the resend button's own rate limit.
+    """
+    last_code = db.scalar(
+        select(TwoFactorCode).where(TwoFactorCode.user_id == user_id).order_by(TwoFactorCode.created_at.desc())
+    )
+    if last_code is None:
+        return 0
+    elapsed_seconds = (datetime.utcnow() - last_code.created_at).total_seconds()
+    return max(int(settings.two_factor_resend_cooldown_seconds - elapsed_seconds), 0)
+
+
 @router.get("/captcha", response_model=CaptchaOut)
 def get_captcha(request: Request):
     puzzle = generate_puzzle()
@@ -194,6 +211,21 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
     if user.two_factor_enabled:
+        # The pending user id lives server-side in the session, never in the
+        # response body - the client can't verify 2FA for an arbitrary user.
+        request.session["pending_2fa_user_id"] = user.id
+
+        # Signing in again (e.g. after closing the code dialog) must not
+        # be a free way to re-trigger a send that resend-2fa would have
+        # rate-limited - the earlier, still-valid/unexpired code just
+        # gets re-shown instead of firing another email.
+        if _two_factor_cooldown_remaining(db, user.id) > 0:
+            return LoginResult(
+                success=True,
+                require_2fa=True,
+                message=f"A code was already sent to {mask_email(user.email)} - check your email.",
+            )
+
         code = generate_two_factor_code()
         expires_at = datetime.utcnow() + timedelta(seconds=settings.two_factor_code_ttl_seconds)
         db.query(TwoFactorCode).filter(
@@ -204,9 +236,6 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
         send_two_factor_code(user.email, user.username, code)
 
-        # The pending user id lives server-side in the session, never in the
-        # response body - the client can't verify 2FA for an arbitrary user.
-        request.session["pending_2fa_user_id"] = user.id
         return LoginResult(
             success=True,
             require_2fa=True,
@@ -276,21 +305,14 @@ def resend_two_factor(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     # Cooldown against hammering this button - without it, nothing stops
-    # hundreds of resend clicks from each firing a fresh email/SMS. Keyed
-    # off the last code issued to this user (whether or not it was ever
-    # used), not a separate counter, so it self-clears with no extra state.
-    last_code = db.scalar(
-        select(TwoFactorCode).where(TwoFactorCode.user_id == user.id).order_by(TwoFactorCode.created_at.desc())
-    )
-    if last_code is not None:
-        elapsed_seconds = (datetime.utcnow() - last_code.created_at).total_seconds()
-        if elapsed_seconds < settings.two_factor_resend_cooldown_seconds:
-            wait_seconds = max(int(settings.two_factor_resend_cooldown_seconds - elapsed_seconds), 1)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {_format_wait_text(wait_seconds)} before requesting another code.",
-                headers={"Retry-After": str(wait_seconds)},
-            )
+    # hundreds of resend clicks from each firing a fresh email/SMS.
+    wait_seconds = _two_factor_cooldown_remaining(db, user.id)
+    if wait_seconds > 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Please wait {_format_wait_text(wait_seconds)} before requesting another code.",
+            headers={"Retry-After": str(wait_seconds)},
+        )
 
     code = generate_two_factor_code()
     expires_at = datetime.utcnow() + timedelta(seconds=settings.two_factor_code_ttl_seconds)

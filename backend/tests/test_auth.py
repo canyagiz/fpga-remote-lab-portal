@@ -112,6 +112,45 @@ def test_resend_2fa_is_rate_limited(client):
     assert int(response.headers["Retry-After"]) > 0
 
 
+def test_repeated_login_cannot_be_used_to_route_around_the_resend_cooldown(client):
+    """Regression test: closing the verification dialog and signing in
+    again used to send a brand new code every time, with no rate limit at
+    all - a free way around resend-2fa's cooldown. Logging in again while
+    a code from moments ago is still pending must just re-show the prompt,
+    not fire another email or invalidate the still-valid original code.
+    """
+    from app.database import SessionLocal
+    from app.models import TwoFactorCode, User
+
+    register(client, "alice", "alice@example.com")
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "alice").first()
+        original_code = (
+            db.query(TwoFactorCode).filter(TwoFactorCode.user_id == user.id).order_by(TwoFactorCode.id.desc()).first()
+        ).code
+    finally:
+        db.close()
+
+    response = client.post("/api/auth/login", json={"username": "alice", "password": "Password123"})
+    assert response.status_code == 200
+    assert response.json()["require_2fa"] is True
+
+    db = SessionLocal()
+    try:
+        codes = db.query(TwoFactorCode).filter(TwoFactorCode.user_id == user.id).all()
+        # Still just the one code register() sent - login() must not have
+        # added (or invalidated) another while the cooldown is active.
+        assert len(codes) == 1
+        assert codes[0].used is False
+    finally:
+        db.close()
+
+    verify = client.post("/api/auth/verify-2fa", json={"code": original_code})
+    assert verify.status_code == 200
+
+
 def test_resend_2fa_succeeds_once_the_cooldown_has_elapsed(client):
     from datetime import datetime, timedelta
 
