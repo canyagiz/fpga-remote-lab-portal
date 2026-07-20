@@ -16,12 +16,19 @@ class MessageOut(BaseModel):
 
 class CaptchaOut(BaseModel):
     success: bool = True
-    # Puzzle-slider geometry (see routers/auth.py and
-    # components/PuzzleCaptcha.tsx): target_x is the piece's correct
-    # drop position within a track track_width px wide.
-    track_width: int
-    piece_size: int
-    target_x: int
+    # Photo-based slide-to-fit puzzle (see app/services/captcha.py and
+    # components/PuzzleCaptcha.tsx). background_image already has the
+    # "hole" baked into its pixels and piece_image is the real photo
+    # content that belongs there - the x position that solves it is
+    # deliberately NOT included here, only kept server-side in the
+    # session, so solving this requires actually looking at the images.
+    background_image: str
+    piece_image: str
+    canvas_width: int
+    canvas_height: int
+    piece_width: int
+    piece_height: int
+    piece_top: int
 
 
 class RegisterRequest(BaseModel):

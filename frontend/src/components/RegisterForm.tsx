@@ -164,11 +164,16 @@ export default function RegisterForm({ onSwitchToLogin, onSuccess }: RegisterFor
             <Label>Security check</Label>
             {captcha ? (
               <PuzzleCaptcha
-                trackWidth={captcha.track_width}
-                pieceSize={captcha.piece_size}
-                targetX={captcha.target_x}
+                backgroundImage={captcha.background_image}
+                pieceImage={captcha.piece_image}
+                canvasWidth={captcha.canvas_width}
+                canvasHeight={captcha.canvas_height}
+                pieceWidth={captcha.piece_width}
+                pieceHeight={captcha.piece_height}
+                pieceTop={captcha.piece_top}
                 value={sliderX}
                 onChange={setSliderX}
+                onReload={() => loadCaptchaAndCsrf().catch(() => setCaptchaFailed(true))}
               />
             ) : (
               <p className="text-sm text-muted-foreground">

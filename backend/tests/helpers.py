@@ -1,6 +1,26 @@
+def captcha_target_x(client):
+    """Test-only: recovers the puzzle's solution the same way
+    SessionMiddleware itself decodes the session cookie. The real client
+    never gets target_x - see app/services/captcha.py - it's baked into
+    where the hole and piece sit in the two images the endpoint returns,
+    which a test has no way to "look at".
+    """
+    import json
+    from base64 import b64decode
+
+    import itsdangerous
+
+    from app.config import settings
+
+    signer = itsdangerous.TimestampSigner(str(settings.secret_key))
+    session = json.loads(b64decode(signer.unsign(client.cookies["session"])))
+    return session["captcha_result"]
+
+
 def register(client, username, email, password="Password123"):
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",

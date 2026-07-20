@@ -1,71 +1,81 @@
-import { Check } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 interface PuzzleCaptchaProps {
-  trackWidth: number;
-  pieceSize: number;
-  targetX: number;
+  backgroundImage: string;
+  pieceImage: string;
+  canvasWidth: number;
+  canvasHeight: number;
+  pieceWidth: number;
+  pieceHeight: number;
+  pieceTop: number;
   value: number;
   onChange: (x: number) => void;
+  onReload?: () => void;
 }
 
-// Cosmetic-only echo of the backend's tolerance (routers/auth.py -
-// CAPTCHA_TOLERANCE_PX) so the piece visibly "snaps" green once it's close
-// enough. The real check happens server-side against the session-stored
-// target_x - this is just what tells the user they can let go.
-const TOLERANCE_PX = 5;
-
-// A slide-the-piece-into-the-gap captcha: an <input type="range"> drives
-// the piece's x position, so dragging, clicking the track, and keyboard
-// arrows (once focused) all work for free - the custom visuals on top are
-// decorative, not the input.
-export default function PuzzleCaptcha({ trackWidth, pieceSize, targetX, value, onChange }: PuzzleCaptchaProps) {
-  const aligned = Math.abs(value - targetX) <= TOLERANCE_PX;
-  const hue = (targetX * 37) % 360;
-
+// A slide-the-piece-into-the-photo captcha: an <input type="range"> drives
+// the piece's x position over the real background image, so dragging,
+// clicking the track, and keyboard arrows (once focused) all work without
+// custom pointer-event math. Unlike a plain "what's 6-1" question, the
+// solution (target_x) is never sent to the client at all - see
+// app/services/captcha.py - it's baked into where the hole and the piece
+// sit in the two images' pixels, so actually looking at the photo is
+// required to answer correctly.
+export default function PuzzleCaptcha({
+  backgroundImage,
+  pieceImage,
+  canvasWidth,
+  canvasHeight,
+  pieceWidth,
+  pieceHeight,
+  pieceTop,
+  value,
+  onChange,
+  onReload,
+}: PuzzleCaptchaProps) {
   return (
-    <div className="space-y-1.5">
+    <div style={{ width: canvasWidth }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">Slide the piece into the gap</p>
+        {onReload && (
+          <button
+            type="button"
+            onClick={onReload}
+            className="text-muted-foreground hover:text-foreground"
+            aria-label="Load a new puzzle"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
       <div
-        className="relative overflow-hidden rounded-md border border-border"
-        style={{
-          width: trackWidth,
-          height: pieceSize + 16,
-          background: `linear-gradient(135deg, hsl(${hue} 70% 88%), hsl(${(hue + 60) % 360} 70% 78%))`,
-        }}
+        className="relative mt-1.5 overflow-hidden rounded-md border border-border bg-muted"
+        style={{ width: canvasWidth, height: canvasHeight }}
       >
-        {/* The gap the piece must be dragged into. */}
-        <div
-          className="absolute top-2 rounded-md border-2 border-dashed border-card/80"
-          style={{
-            left: targetX,
-            width: pieceSize,
-            height: pieceSize,
-            boxShadow: "inset 0 0 0 999px rgba(15, 23, 42, 0.35)",
-          }}
+        <img
+          src={backgroundImage}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full select-none"
         />
-        {/* The draggable piece. */}
-        <div
-          className={
-            "absolute top-2 flex items-center justify-center rounded-md border-2 shadow transition-colors " +
-            (aligned ? "border-success bg-success/90" : "border-primary bg-primary/90")
-          }
-          style={{ left: value, width: pieceSize, height: pieceSize }}
-          aria-hidden="true"
-        >
-          {aligned && <Check className="h-5 w-5 text-success-foreground" />}
-        </div>
+        <img
+          src={pieceImage}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute select-none drop-shadow-md"
+          style={{ left: value, top: pieceTop, width: pieceWidth, height: pieceHeight }}
+        />
         <input
           type="range"
           min={0}
-          max={trackWidth - pieceSize}
+          max={canvasWidth - pieceWidth}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
           required
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-          aria-label="Slide the piece into the outlined gap"
-          aria-valuetext={aligned ? "Piece is aligned with the gap" : value < targetX ? "Slide right" : "Slide left"}
+          aria-label="Slide the piece into the gap in the photo"
         />
       </div>
-      <p className="text-xs text-muted-foreground">Slide the piece into the gap</p>
     </div>
   );
 }

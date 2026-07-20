@@ -1,4 +1,3 @@
-import random
 import secrets
 from datetime import datetime, timedelta
 
@@ -25,25 +24,26 @@ from app.schemas import (
 )
 from app.security import generate_two_factor_code, hash_password, mask_email, verify_password
 from app.services.admin import sync_user_role
+from app.services.captcha import CAPTCHA_TOLERANCE_PX, generate_puzzle
 from app.services.email import send_two_factor_code
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# Puzzle-slider captcha geometry, shared with the frontend via the
-# /captcha response - see components/PuzzleCaptcha.tsx. A tolerance is
-# needed because the frontend submits wherever the user's pointer/keyboard
-# release lands, not necessarily the exact pixel.
-CAPTCHA_TRACK_WIDTH = 280
-CAPTCHA_PIECE_SIZE = 44
-CAPTCHA_TOLERANCE_PX = 5
-
 
 @router.get("/captcha", response_model=CaptchaOut)
 def get_captcha(request: Request):
-    target_x = random.randint(0, CAPTCHA_TRACK_WIDTH - CAPTCHA_PIECE_SIZE)
+    puzzle = generate_puzzle()
 
-    request.session["captcha_result"] = target_x
-    return CaptchaOut(track_width=CAPTCHA_TRACK_WIDTH, piece_size=CAPTCHA_PIECE_SIZE, target_x=target_x)
+    request.session["captcha_result"] = puzzle.target_x
+    return CaptchaOut(
+        background_image=puzzle.background_image,
+        piece_image=puzzle.piece_image,
+        canvas_width=puzzle.canvas_width,
+        canvas_height=puzzle.canvas_height,
+        piece_width=puzzle.piece_width,
+        piece_height=puzzle.piece_height,
+        piece_top=puzzle.piece_top,
+    )
 
 
 @router.get("/csrf-token")

@@ -11,9 +11,13 @@ export interface User {
 
 export interface CaptchaResponse {
   success: boolean;
-  track_width: number;
-  piece_size: number;
-  target_x: number;
+  background_image: string;
+  piece_image: string;
+  canvas_width: number;
+  canvas_height: number;
+  piece_width: number;
+  piece_height: number;
+  piece_top: number;
 }
 
 export interface MessageResponse {

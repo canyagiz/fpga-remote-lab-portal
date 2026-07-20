@@ -1,4 +1,4 @@
-from tests.helpers import login, make_admin, register
+from tests.helpers import captcha_target_x, login, make_admin, register
 
 
 def test_register_rejects_wrong_captcha(client):
@@ -104,7 +104,8 @@ def test_registration_rate_limit_reports_how_long_to_wait(client):
         register(client, f"ratelimit{i}", f"ratelimit{i}@example.com")
 
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",
@@ -126,7 +127,8 @@ def _attempt_register_with_weak_password(client, username):
     """A submission that fails content validation (weak password) - used
     to confirm this still consumes a rate-limit slot, unlike before."""
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
     return client.post(
         "/api/auth/register",
         json={
@@ -194,7 +196,8 @@ def test_registration_username_is_case_insensitively_unique(client):
     register(client, "alice", "alice@example.com")
 
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",
@@ -214,7 +217,8 @@ def test_registration_email_is_case_insensitively_unique(client):
     register(client, "alice", "alice@example.com")
 
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",
@@ -253,7 +257,8 @@ def test_login_with_email_is_case_insensitive(client):
 
 def test_registration_rejects_a_password_without_uppercase(client):
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",
@@ -271,7 +276,8 @@ def test_registration_rejects_a_password_without_uppercase(client):
 
 def test_registration_rejects_a_password_without_a_digit(client):
     csrf = client.get("/api/auth/csrf-token").json()["token"]
-    answer = client.get("/api/auth/captcha").json()["target_x"]
+    client.get("/api/auth/captcha")
+    answer = captcha_target_x(client)
 
     response = client.post(
         "/api/auth/register",
