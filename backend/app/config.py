@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     # alone the current Mailpit lookup workflow before real SMTP is wired
     # up. 5 minutes is a more realistic window.
     two_factor_code_ttl_seconds: int = 300
+    # Minimum gap between two "resend code" clicks for the same pending
+    # verification - without it, nothing stops the button being hammered
+    # into sending hundreds of emails.
+    two_factor_resend_cooldown_seconds: int = 180
     registration_rate_limit_window_minutes: int = 15
     registration_rate_limit_max_attempts: int = 5
     # A real DNS MX-record lookup at registration time (see schemas.py -

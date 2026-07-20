@@ -30,6 +30,13 @@ from app.services.email import send_two_factor_code
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _format_wait_text(wait_seconds: int) -> str:
+    wait_minutes = wait_seconds // 60
+    if wait_minutes >= 1:
+        return f"{wait_minutes} minute{'s' if wait_minutes != 1 else ''}"
+    return f"{wait_seconds} second{'s' if wait_seconds != 1 else ''}"
+
+
 @router.get("/captcha", response_model=CaptchaOut)
 def get_captcha(request: Request):
     puzzle = generate_puzzle()
@@ -85,14 +92,9 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
         # below the limit again and a retry succeeds.
         retry_at = recent_attempt_times[0] + timedelta(minutes=settings.registration_rate_limit_window_minutes)
         wait_seconds = max(int((retry_at - now).total_seconds()), 1)
-        wait_minutes = wait_seconds // 60
-        if wait_minutes >= 1:
-            wait_text = f"{wait_minutes} minute{'s' if wait_minutes != 1 else ''}"
-        else:
-            wait_text = f"{wait_seconds} second{'s' if wait_seconds != 1 else ''}"
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many attempts. Please try again in {wait_text}.",
+            detail=f"Too many attempts. Please try again in {_format_wait_text(wait_seconds)}.",
             headers={"Retry-After": str(wait_seconds)},
         )
     # Committed immediately, decoupled from whatever happens next - a bad
@@ -268,6 +270,23 @@ def resend_two_factor(request: Request, db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # Cooldown against hammering this button - without it, nothing stops
+    # hundreds of resend clicks from each firing a fresh email/SMS. Keyed
+    # off the last code issued to this user (whether or not it was ever
+    # used), not a separate counter, so it self-clears with no extra state.
+    last_code = db.scalar(
+        select(TwoFactorCode).where(TwoFactorCode.user_id == user.id).order_by(TwoFactorCode.created_at.desc())
+    )
+    if last_code is not None:
+        elapsed_seconds = (datetime.utcnow() - last_code.created_at).total_seconds()
+        if elapsed_seconds < settings.two_factor_resend_cooldown_seconds:
+            wait_seconds = max(int(settings.two_factor_resend_cooldown_seconds - elapsed_seconds), 1)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Please wait {_format_wait_text(wait_seconds)} before requesting another code.",
+                headers={"Retry-After": str(wait_seconds)},
+            )
 
     code = generate_two_factor_code()
     expires_at = datetime.utcnow() + timedelta(seconds=settings.two_factor_code_ttl_seconds)

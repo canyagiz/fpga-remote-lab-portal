@@ -97,6 +97,39 @@ def test_2fa_verification_uses_session_not_client_supplied_user_id(client):
     assert response.status_code == 400
 
 
+def test_resend_2fa_is_rate_limited(client):
+    """register() already sent one code; hammering resend right after
+    must be rejected instead of firing an email per click."""
+    register(client, "alice", "alice@example.com")
+
+    response = client.post("/api/auth/resend-2fa")
+    assert response.status_code == 429
+    assert "minute" in response.json()["detail"] or "second" in response.json()["detail"]
+    assert int(response.headers["Retry-After"]) > 0
+
+
+def test_resend_2fa_succeeds_once_the_cooldown_has_elapsed(client):
+    from datetime import datetime, timedelta
+
+    from app.database import SessionLocal
+    from app.models import TwoFactorCode, User
+
+    register(client, "alice", "alice@example.com")
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.username == "alice").first()
+        db.query(TwoFactorCode).filter(TwoFactorCode.user_id == user.id).update(
+            {"created_at": datetime.utcnow() - timedelta(minutes=10)}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/api/auth/resend-2fa")
+    assert response.status_code == 200
+
+
 def test_registration_rate_limit_reports_how_long_to_wait(client):
     from app.config import settings
 
