@@ -31,10 +31,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _format_wait_text(wait_seconds: int) -> str:
-    wait_minutes = wait_seconds // 60
-    if wait_minutes >= 1:
-        return f"{wait_minutes} minute{'s' if wait_minutes != 1 else ''}"
-    return f"{wait_seconds} second{'s' if wait_seconds != 1 else ''}"
+    # m:ss, not a rounded "2 minutes" - flooring to whole minutes used to
+    # report e.g. 179 remaining seconds as "2 minutes" while the frontend's
+    # live countdown (which starts from this same number, see
+    # ApiError.retryAfterSeconds) correctly ticks all the way down from
+    # 2:59, so the button stayed disabled for a minute longer than the
+    # toast had just promised.
+    minutes, seconds = divmod(wait_seconds, 60)
+    return f"{minutes}:{seconds:02d}"
 
 
 @router.get("/captcha", response_model=CaptchaOut)

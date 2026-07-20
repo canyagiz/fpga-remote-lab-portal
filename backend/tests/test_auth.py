@@ -1,3 +1,5 @@
+import re
+
 from tests.helpers import captcha_target_x, login, make_admin, register
 
 
@@ -104,7 +106,9 @@ def test_resend_2fa_is_rate_limited(client):
 
     response = client.post("/api/auth/resend-2fa")
     assert response.status_code == 429
-    assert "minute" in response.json()["detail"] or "second" in response.json()["detail"]
+    # m:ss, matching the frontend's own live countdown (see auth.py -
+    # _format_wait_text) rather than a separately-rounded "N minutes".
+    assert re.search(r"\d+:\d{2}", response.json()["detail"])
     assert int(response.headers["Retry-After"]) > 0
 
 
@@ -152,7 +156,9 @@ def test_registration_rate_limit_reports_how_long_to_wait(client):
         },
     )
     assert response.status_code == 429
-    assert "minute" in response.json()["detail"] or "second" in response.json()["detail"]
+    # m:ss, matching the frontend's own live countdown (see auth.py -
+    # _format_wait_text) rather than a separately-rounded "N minutes".
+    assert re.search(r"\d+:\d{2}", response.json()["detail"])
     assert int(response.headers["Retry-After"]) > 0
 
 
