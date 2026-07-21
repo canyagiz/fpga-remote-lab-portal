@@ -31,7 +31,15 @@ def test_seeded_lab_catalog_comes_from_labs_yaml(client):
     arty = next(lab for lab in labs if lab["name"] == "Arty Z7 Lab")
     assert arty["is_public"] is True
     assert arty["guide_url"] == "/guides/arty-prerequest.html"
-    assert sum(1 for lab in labs if lab["is_public"]) == 1
+    # Named rather than counted: a bare count said only "one of them
+    # changed" when Cyclone IV was published, which is the least useful
+    # version of that message. This says which labs are meant to be
+    # public, so making another one public fails with the answer in the
+    # diff.
+    assert {lab["name"] for lab in labs if lab["is_public"]} == {
+        "Cyclone IV Lab",
+        "Arty Z7 Lab",
+    }
 
 
 def test_list_labs_includes_new_metadata_fields(client):
