@@ -225,6 +225,13 @@ class Shuttle(Base):
     # Self-reported by the agent, kept for diagnostics only. Deliberately
     # not trusted for identity: an agent could claim any hostname.
     hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Where this machine's lab containers are actually reached, e.g.
+    # "10.30.70.23". Set by an admin at enrolment and NEVER taken from a
+    # report: student browsers are redirected to a URL built from this,
+    # so an agent able to set its own address could point users at a host
+    # of its choosing. `hostname` above is for humans; this is the only
+    # field allowed to influence where traffic goes.
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[ShuttleRole] = mapped_column(Enum(ShuttleRole), default=ShuttleRole.worker)
     # SHA-256 of the token secret. Not bcrypt: the secret is 256 bits of
     # CSPRNG output, so there is no dictionary to slow an attacker down,
@@ -390,6 +397,50 @@ class LabTemplate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (Index("ix_lab_templates_name_lower", func.lower(name), unique=True),)
+
+
+class LabDeployment(Base):
+    """Binds a catalogue entry to the physical board that serves it.
+
+    Deliberately additive. A Lab with no deployment behaves exactly as it
+    always has - its static backend_url is used and it is listed on the
+    same rules as before - so shipping this changes nothing until an
+    admin creates a deployment for a lab. That is what makes it safe to
+    put in front of a running teaching lab.
+
+    Once a deployment exists it takes over two things:
+      * the address students are sent to, resolved from wherever the
+        board currently is rather than a line in labs.yaml
+      * whether the lab is offered at all, from the template's own
+        requirements being met right now
+    """
+
+    __tablename__ = "lab_deployments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # The student-facing catalogue entry this serves.
+    lab_id: Mapped[int] = mapped_column(ForeignKey("labs.id", ondelete="CASCADE"), unique=True)
+    # What it needs, checked against the shuttle holding the board.
+    template_id: Mapped[int] = mapped_column(ForeignKey("lab_templates.id", ondelete="RESTRICT"))
+    # Which physical board. No shuttle column: the board is wherever its
+    # programmer serial is currently reported, so the shuttle is derived
+    # and moving hardware needs no edit here.
+    board_id: Mapped[int] = mapped_column(ForeignKey("boards.id", ondelete="RESTRICT"))
+    # Port of the lab container on whichever shuttle holds the board.
+    # A property of how shuttles are provisioned, not of the board, so it
+    # travels with the deployment: moving a board to another machine
+    # keeps the port and changes only the host. That assumes shuttles are
+    # provisioned alike, which is true here and is why the fleet setup is
+    # a documented checklist rather than ad-hoc.
+    port: Mapped[int] = mapped_column(Integer)
+    # Lets an admin take a lab out of service without deleting the
+    # binding or touching the catalogue entry.
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    lab: Mapped["Lab"] = relationship()
+    template: Mapped["LabTemplate"] = relationship()
+    board: Mapped["Board"] = relationship()
 
 
 class AdminEmail(Base):

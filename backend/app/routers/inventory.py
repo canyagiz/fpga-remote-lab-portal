@@ -24,19 +24,32 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import Board, Device, FpgaFamily, LabTemplate, Shuttle, ShuttleRole, User
+from app.models import (
+    Board,
+    Device,
+    FpgaFamily,
+    Lab,
+    LabDeployment,
+    LabTemplate,
+    Shuttle,
+    ShuttleRole,
+    User,
+)
 from app.schemas import (
     AgentReport,
     AgentReportAccepted,
     BoardCreate,
     BoardOut,
     CreateShuttleRequest,
+    DeploymentCreate,
+    DeploymentOut,
     DeviceOut,
     GapReportOut,
     LabTemplateCreate,
     LabTemplateOut,
     MessageOut,
     RequirementResultOut,
+    ShuttleAddressUpdate,
     ShuttleEnrolled,
     ShuttleOut,
     UnclaimedDeviceOut,
@@ -46,7 +59,7 @@ from app.security import (
     parse_shuttle_token,
     verify_shuttle_secret,
 )
-from app.services import inventory, matching
+from app.services import deployments, inventory, matching
 from app.services import requirements as requirements_module
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -459,3 +472,117 @@ def all_gaps(db: Session = Depends(get_db)):
 def unused(db: Session = Depends(get_db)):
     """Hardware no template has any use for - the spare side of the report."""
     return matching.unused_devices(db)
+
+
+# ---- Deployments -----------------------------------------------------
+#
+# Binding a catalogue entry to a physical board. Until one of these
+# exists for a lab, that lab behaves exactly as it always has.
+
+
+def _deployment_out(db: Session, deployment: LabDeployment) -> DeploymentOut:
+    resolved = deployments.resolve(db, deployment.lab)
+    return DeploymentOut(
+        id=deployment.id,
+        lab_id=deployment.lab_id,
+        lab_name=deployment.lab.name,
+        template_id=deployment.template_id,
+        template_name=deployment.template.name,
+        board_id=deployment.board_id,
+        board_label=deployment.board.label,
+        port=deployment.port,
+        is_enabled=deployment.is_enabled,
+        created_at=deployment.created_at,
+        shuttle_id=resolved.shuttle.id if resolved and resolved.shuttle else None,
+        shuttle_name=resolved.shuttle.name if resolved and resolved.shuttle else None,
+        backend_url=resolved.backend_url if resolved else None,
+        available=bool(resolved and resolved.available),
+        reason=resolved.reason if resolved else None,
+    )
+
+
+@admin_router.get("/deployments", response_model=list[DeploymentOut])
+def list_deployments(db: Session = Depends(get_db)):
+    rows = db.scalars(select(LabDeployment).order_by(LabDeployment.id)).all()
+    return [_deployment_out(db, d) for d in rows]
+
+
+@admin_router.post("/deployments", response_model=DeploymentOut, status_code=201)
+def create_deployment(payload: DeploymentCreate, db: Session = Depends(get_db)):
+    """Bind a lab to a board. This is the moment a lab starts being
+    governed by the inventory instead of by its static backend_url."""
+    lab = db.get(Lab, payload.lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    template = db.get(LabTemplate, payload.template_id)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    board = db.get(Board, payload.board_id)
+    if board is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+
+    deployment = LabDeployment(
+        lab_id=lab.id,
+        template_id=template.id,
+        board_id=board.id,
+        port=payload.port,
+    )
+    db.add(deployment)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="That lab already has a deployment - delete it first to rebind",
+        )
+    db.refresh(deployment)
+    return _deployment_out(db, deployment)
+
+
+@admin_router.post("/deployments/{deployment_id}/enable", response_model=DeploymentOut)
+def set_deployment_enabled(
+    deployment_id: int, enabled: bool = True, db: Session = Depends(get_db)
+):
+    """Take a lab in or out of service without unbinding it."""
+    deployment = db.get(LabDeployment, deployment_id)
+    if deployment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
+    deployment.is_enabled = enabled
+    db.commit()
+    db.refresh(deployment)
+    return _deployment_out(db, deployment)
+
+
+@admin_router.delete("/deployments/{deployment_id}", response_model=MessageOut)
+def delete_deployment(deployment_id: int, db: Session = Depends(get_db)):
+    """Unbind. The lab reverts to its static backend_url, exactly as
+    before it was ever deployed - which is what makes this reversible."""
+    deployment = db.get(LabDeployment, deployment_id)
+    if deployment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
+    name = deployment.lab.name
+    db.delete(deployment)
+    db.commit()
+    return MessageOut(
+        success=True, message=f"{name} is no longer bound to a board; its static URL applies again"
+    )
+
+
+@admin_router.put("/shuttles/{shuttle_id}/address", response_model=ShuttleOut)
+def set_shuttle_address(
+    shuttle_id: int, payload: ShuttleAddressUpdate, db: Session = Depends(get_db)
+):
+    """Set where this shuttle's lab containers are reached.
+
+    Kept as an explicit admin action rather than something an agent can
+    report, because this is the value student browsers are ultimately
+    sent to.
+    """
+    shuttle = db.get(Shuttle, shuttle_id)
+    if shuttle is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shuttle not found")
+    shuttle.address = payload.address.strip()
+    db.commit()
+    db.refresh(shuttle)
+    return _shuttle_out(db, shuttle)

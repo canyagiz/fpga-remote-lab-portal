@@ -10,6 +10,7 @@ from app.deps import get_current_user
 from app.models import Reservation, ReservationStatus, User, UserProfile
 from app.schemas import DeleteAccountRequest, MessageOut, ProfileOut, ProfileUpdate, PublicProfileOut
 from app.security import verify_password
+from app.services import deployments
 from app.services.weblab import close_weblab_session
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -115,7 +116,11 @@ def delete_my_account(
     for reservation in reservations:
         if reservation.status == ReservationStatus.active and reservation.weblab_session_url:
             try:
-                close_weblab_session(reservation.lab, reservation.weblab_session_url)
+                close_weblab_session(
+                    reservation.lab,
+                    reservation.weblab_session_url,
+                    backend_url=deployments.address_for(db, reservation.lab),
+                )
             except httpx.HTTPError:
                 logger.warning(
                     "Could not close hardware session for reservation %d while deleting user %d",

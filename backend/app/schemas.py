@@ -210,6 +210,11 @@ class LabOut(BaseModel):
     # see services/availability.py::next_available_at.
     next_available_at: datetime | None
     guide_url: str | None
+    # None for a lab with no deployment - which is every lab until an
+    # admin binds one, so adding these changes nothing about the
+    # catalogue as it stands today.
+    deployment_status: str | None = None
+    unavailable_reason: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -587,3 +592,37 @@ class GapReportOut(BaseModel):
     deployable: bool
     missing_count: int
     results: list[RequirementResultOut]
+
+
+class DeploymentCreate(BaseModel):
+    lab_id: int
+    template_id: int
+    board_id: int
+    port: int = Field(ge=1, le=65535)
+
+
+class DeploymentOut(BaseModel):
+    id: int
+    lab_id: int
+    lab_name: str
+    template_id: int
+    template_name: str
+    board_id: int
+    board_label: str
+    port: int
+    is_enabled: bool
+    created_at: datetime
+    # All recomputed per request rather than stored: a cached
+    # "available" that has gone stale sends a student into a lab that is
+    # not there.
+    shuttle_id: int | None
+    shuttle_name: str | None
+    backend_url: str | None
+    available: bool
+    reason: str | None
+
+
+class ShuttleAddressUpdate(BaseModel):
+    # Admin-set, never taken from an agent report: this is what student
+    # browsers are ultimately pointed at.
+    address: str = Field(min_length=1, max_length=255)

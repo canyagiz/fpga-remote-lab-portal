@@ -79,6 +79,19 @@ class GapReport:
         return sum(1 for r in self.results if r.status is not req.RequirementStatus.satisfied)
 
 
+def shuttle_status_is_offline(db: Session, shuttle: Shuttle) -> bool:
+    """Has this node gone quiet?
+
+    Thin wrapper over services/inventory.shuttle_status so callers that
+    only care about the yes/no do not have to know the vocabulary, and
+    so "never reported" counts as offline rather than being a third case
+    every caller has to remember to handle.
+    """
+    from app.services import inventory
+
+    return inventory.shuttle_status(shuttle) != "online"
+
+
 def build_inventory(db: Session, shuttle: Shuttle) -> ShuttleInventory:
     devices = list(
         db.scalars(

@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, require_admin
-from app.models import Lab, Reservation, ReservationStatus, User
+from app.models import Lab, Reservation, ReservationStatus, User, UserRole
 from app.schemas import LabAccessOut, LabCreate, LabOut
 from app.services.availability import next_available_at
+from app.services import deployments
 from app.services.weblab import WeblabSessionError, start_weblab_session
 
 router = APIRouter(prefix="/labs", tags=["labs"])
@@ -18,6 +19,9 @@ router = APIRouter(prefix="/labs", tags=["labs"])
 
 def _to_out(db: Session, lab: Lab, queue_count: int) -> LabOut:
     available_at = next_available_at(db, lab.id)
+    # None for a lab with no deployment, which is every lab until an
+    # admin binds one - see services/deployments.py.
+    resolved = deployments.resolve(db, lab)
     return LabOut(
         id=lab.id,
         name=lab.name,
@@ -30,11 +34,13 @@ def _to_out(db: Session, lab: Lab, queue_count: int) -> LabOut:
         is_public=lab.is_public,
         next_available_at=available_at.replace(tzinfo=timezone.utc) if available_at is not None else None,
         guide_url=lab.guide_url,
+        deployment_status=resolved.status if resolved else None,
+        unavailable_reason=resolved.reason if resolved else None,
     )
 
 
 @router.get("", response_model=list[LabOut])
-def list_labs(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def list_labs(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     rows = db.execute(
         select(
             Lab,
@@ -47,7 +53,16 @@ def list_labs(db: Session = Depends(get_db), _: User = Depends(get_current_user)
         .order_by(Lab.id)
     ).all()
 
-    return [_to_out(db, lab, queue_count or 0) for lab, queue_count in rows]
+    entries = [_to_out(db, lab, queue_count or 0) for lab, queue_count in rows]
+
+    # A deployed lab whose hardware is not currently fit to serve is
+    # withdrawn from the catalogue rather than left bookable - today that
+    # failure is discovered by a student, mid-session, as a black video
+    # feed. Admins keep seeing it, annotated with why, since hiding a
+    # fault from the people who fix it helps nobody.
+    if user.role is UserRole.admin:
+        return entries
+    return [e for e in entries if e.deployment_status != "unavailable"]
 
 
 @router.post("", response_model=LabOut, status_code=201)
@@ -77,6 +92,16 @@ def access_lab(
     if lab is None or lab.backend_url is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
 
+    # Enforced here as well as in the listing: hiding a lab from the
+    # catalogue is not access control, and a user holding a reservation
+    # from before the hardware broke still has a working link to it.
+    resolved = deployments.resolve(db, lab)
+    if resolved is not None and not resolved.available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"This lab is temporarily unavailable: {resolved.reason}",
+        )
+
     reservation = db.scalar(
         select(Reservation).where(
             Reservation.lab_id == lab_id,
@@ -104,7 +129,15 @@ def access_lab(
         back_url = f"{str(request.base_url).rstrip('/')}/labs"
 
         try:
-            session_url = start_weblab_session(lab, user, duration_seconds=remaining, back_url=back_url)
+            session_url = start_weblab_session(
+                lab,
+                user,
+                duration_seconds=remaining,
+                back_url=back_url,
+                # Health already checked above, so this is the address of
+                # the shuttle currently holding the board.
+                backend_url=resolved.backend_url if resolved else None,
+            )
         except (httpx.HTTPError, WeblabSessionError) as err:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,

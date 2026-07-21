@@ -23,10 +23,21 @@ class WeblabSessionError(RuntimeError):
     """The hardware container reachable but refused to start a session."""
 
 
-def start_weblab_session(lab: Lab, user: User, duration_seconds: int, back_url: str) -> str:
+def start_weblab_session(
+    lab: Lab,
+    user: User,
+    duration_seconds: int,
+    back_url: str,
+    backend_url: str | None = None,
+) -> str:
+    # backend_url overrides lab.backend_url when the lab is bound to a
+    # deployment, so the session is opened on whichever shuttle actually
+    # holds the board right now. Defaulting to None keeps every existing
+    # caller on exactly the behaviour it had.
+    base = backend_url or lab.backend_url
     now = datetime.now(timezone.utc)
     response = httpx.post(
-        f"{lab.backend_url}{_SESSION_PATH}",
+        f"{base}{_SESSION_PATH}",
         auth=(settings.weblab_username, settings.weblab_password),
         json={
             "request": {
@@ -56,7 +67,7 @@ def start_weblab_session(lab: Lab, user: User, duration_seconds: int, back_url: 
     return data["url"]
 
 
-def close_weblab_session(lab: Lab, session_id: str) -> None:
+def close_weblab_session(lab: Lab, session_id: str, backend_url: str | None = None) -> None:
     """Force-end a session from the broker side - labdiscoverylib's own
     DELETE /sessions/{id} endpoint, whose docstring says exactly this is
     for: "kick one user out... when an administrator defines so, or when
@@ -70,16 +81,17 @@ def close_weblab_session(lab: Lab, session_id: str) -> None:
     what our own database now considers a free board while the first
     session is still physically live on CT300.
     """
+    base = backend_url or lab.backend_url
     session_id = session_id.rstrip("/").rsplit("/", 1)[-1]
     response = httpx.delete(
-        f"{lab.backend_url}{_SESSION_PATH}{session_id}",
+        f"{base}{_SESSION_PATH}{session_id}",
         auth=(settings.weblab_username, settings.weblab_password),
         timeout=10,
     )
     response.raise_for_status()
 
 
-def is_weblab_session_finished(lab: Lab, session_id: str) -> bool:
+def is_weblab_session_finished(lab: Lab, session_id: str, backend_url: str | None = None) -> bool:
     """Whether the hardware container itself already considers this
     session over - explicit in-lab logout (arty_lab_overlay/views.py's
     `/logout` route calls labdiscoverylib's logout(), which force-exits
@@ -90,9 +102,10 @@ def is_weblab_session_finished(lab: Lab, session_id: str) -> bool:
     so services/queue.py::sweep_logged_out_sessions calls this
     periodically for every reservation with an open session.
     """
+    base = backend_url or lab.backend_url
     session_id = session_id.rstrip("/").rsplit("/", 1)[-1]
     response = httpx.get(
-        f"{lab.backend_url}/foo/ldl/sessions/{session_id}/status",
+        f"{base}/foo/ldl/sessions/{session_id}/status",
         auth=(settings.weblab_username, settings.weblab_password),
         timeout=10,
     )

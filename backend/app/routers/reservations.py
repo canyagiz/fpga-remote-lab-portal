@@ -19,13 +19,14 @@ from app.services.availability import (
     reservation_window as _reservation_window,
 )
 from app.services.queue import renumber_queue
+from app.services import deployments
 from app.services.weblab import close_weblab_session
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
 logger = logging.getLogger("fpga_remote_lab")
 
 
-def _close_hardware_session_if_open(reservation: Reservation) -> None:
+def _close_hardware_session_if_open(db: Session, reservation: Reservation) -> None:
     """Ending a reservation from our side (Finish, Cancel) must also end
     the real WebLab session on CT300 - otherwise the browser tab that
     already had the hardware page open keeps working, and a second user
@@ -38,7 +39,11 @@ def _close_hardware_session_if_open(reservation: Reservation) -> None:
     if reservation.weblab_session_url is None:
         return
     try:
-        close_weblab_session(reservation.lab, reservation.weblab_session_url)
+        close_weblab_session(
+            reservation.lab,
+            reservation.weblab_session_url,
+            backend_url=deployments.address_for(db, reservation.lab),
+        )
     except httpx.HTTPError:
         logger.warning(
             "Could not close hardware session for reservation %d (lab %d) - it may still be reachable elsewhere",
@@ -280,7 +285,7 @@ def cancel_reservation(
     if reservation.status not in (ReservationStatus.pending, ReservationStatus.active):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reservation is not open")
 
-    _close_hardware_session_if_open(reservation)
+    _close_hardware_session_if_open(db, reservation)
     reservation.status = ReservationStatus.cancelled
     reservation.usage_end_time = datetime.utcnow()
     db.commit()
@@ -314,7 +319,7 @@ def complete_lab_usage(
             detail="This session has already run out of time.",
         )
 
-    _close_hardware_session_if_open(reservation)
+    _close_hardware_session_if_open(db, reservation)
     reservation.status = ReservationStatus.completed
     reservation.usage_end_time = datetime.utcnow()
     db.commit()

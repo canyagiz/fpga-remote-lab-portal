@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Reservation, ReservationStatus
 from app.services.availability import ACCESS_GRACE_PERIOD
+from app.services import deployments
 from app.services.weblab import close_weblab_session, is_weblab_session_finished
 
 logger = logging.getLogger("fpga_remote_lab")
@@ -65,7 +66,11 @@ def sweep_expired_reservations(db: Session) -> int:
             # ticking timeout) or the browser tab just keeps working.
             if reservation.weblab_session_url is not None:
                 try:
-                    close_weblab_session(reservation.lab, reservation.weblab_session_url)
+                    close_weblab_session(
+                        reservation.lab,
+                        reservation.weblab_session_url,
+                        backend_url=deployments.address_for(db, reservation.lab),
+                    )
                 except httpx.HTTPError:
                     logger.warning(
                         "Could not close hardware session for overrun reservation %d (lab %d)",
@@ -121,9 +126,22 @@ def sweep_logged_out_sessions(db: Session) -> int:
     if not active_with_session:
         return 0
 
+    # Resolved here, on this thread, and passed in below. A SQLAlchemy
+    # Session is not thread-safe, so anything touching `db` has to happen
+    # before the pool starts - inside _check it would be several threads
+    # sharing one session.
+    addresses = {
+        reservation.id: deployments.address_for(db, reservation.lab)
+        for reservation in active_with_session
+    }
+
     def _check(reservation: Reservation) -> tuple[Reservation, bool]:
         try:
-            return reservation, is_weblab_session_finished(reservation.lab, reservation.weblab_session_url)
+            return reservation, is_weblab_session_finished(
+                reservation.lab,
+                reservation.weblab_session_url,
+                backend_url=addresses[reservation.id],
+            )
         except httpx.HTTPError:
             # Hardware unreachable or mid-restart right now - leave the
             # reservation as is and try again on the next sweep.
