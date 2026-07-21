@@ -202,6 +202,105 @@ class LoginEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ShuttleRole(str, enum.Enum):
+    master = "master"
+    worker = "worker"
+
+
+class Shuttle(Base):
+    """One physical machine running an inventory agent.
+
+    Created by an admin (enrolment), never by an agent announcing
+    itself - a machine that merely sends a request must not become part
+    of the fleet. The agent authenticates with a token issued at that
+    moment; only its hash is kept here.
+    """
+
+    __tablename__ = "shuttles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Admin-chosen label, stable regardless of what the machine calls
+    # itself. Reporting is keyed off the token, never off this.
+    name: Mapped[str] = mapped_column(String(100))
+    # Self-reported by the agent, kept for diagnostics only. Deliberately
+    # not trusted for identity: an agent could claim any hostname.
+    hostname: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    role: Mapped[ShuttleRole] = mapped_column(Enum(ShuttleRole), default=ShuttleRole.worker)
+    # SHA-256 of the token secret. Not bcrypt: the secret is 256 bits of
+    # CSPRNG output, so there is no dictionary to slow an attacker down,
+    # and this is verified on every report from every shuttle - paying
+    # bcrypt's deliberate cost here would buy nothing.
+    token_hash: Mapped[str] = mapped_column(String(64))
+    agent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Absence of this is what marks a node offline; see
+    # services/inventory.py::shuttle_status.
+    last_report_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    enrolled_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    devices: Mapped[list["Device"]] = relationship(
+        back_populates="shuttle", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    __table_args__ = (Index("ix_shuttles_name_lower", func.lower(name), unique=True),)
+
+
+class Device(Base):
+    """A piece of hardware an agent reported seeing on its shuttle.
+
+    Every column here is owned by the scanner and overwritten on each
+    report - nothing a human types belongs in this table. The human's
+    interpretation ("this is EduPow CV #3") is a separate concern and
+    binds to `usb_serial`, which is why the serial matters more than the
+    row id or the port path.
+    """
+
+    __tablename__ = "devices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shuttle_id: Mapped[int] = mapped_column(ForeignKey("shuttles.id", ondelete="CASCADE"))
+    # Free-form rather than an Enum on purpose: the vocabulary belongs to
+    # the agent, and agents are allowed to run ahead of the master (see
+    # the versioning note in docs/agent-protocol.md). An unknown kind
+    # must round-trip and be visible, not be rejected at the door.
+    kind: Mapped[str] = mapped_column(String(32))
+    usb_vendor_id: Mapped[str] = mapped_column(String(8))
+    usb_product_id: Mapped[str] = mapped_column(String(8))
+    # The stable identity when present. Devices without one can only be
+    # tracked by port path, which breaks on replug - surfaced to admins
+    # rather than silently tolerated.
+    usb_serial: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    product: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sysfs_path: Mapped[str] = mapped_column(String(64))
+    signature: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Full JTAG chain as last probed, e.g.
+    # [{"idcode": "0x3727093", "name": "xc7z020", "kind": "zynq"}].
+    # A list because a chain really can hold several parts - a Zynq puts
+    # its ARM core alongside the fabric. Null means never probed, which
+    # is the normal state: probing is active and takes the chain lock.
+    jtag_chain: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    # Only meaningful for capture devices. None = could not determine,
+    # which is deliberately distinct from False (positively no signal) -
+    # only one of those is a fault worth hiding a lab for.
+    has_video_signal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # False once a report no longer mentions it. Rows are kept rather
+    # than deleted so that "this board was here yesterday" stays
+    # answerable after someone unplugs it.
+    is_present: Mapped[bool] = mapped_column(Boolean, default=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    shuttle: Mapped["Shuttle"] = relationship(back_populates="devices")
+
+    __table_args__ = (
+        Index("ix_devices_shuttle_serial", "shuttle_id", "usb_serial"),
+        Index("ix_devices_shuttle_path", "shuttle_id", "sysfs_path"),
+    )
+
+
 class AdminEmail(Base):
     """An email granted admin rights at runtime by an existing admin.
 

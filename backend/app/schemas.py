@@ -374,3 +374,132 @@ class DeleteAccountRequest(BaseModel):
     # session cookie alone is a ~30-day sliding window, so an abandoned
     # open session shouldn't be enough to wipe the account.
     password: str
+
+
+# ---- Fleet inventory -------------------------------------------------
+#
+# The agent-contract version this master was written against. A mismatch
+# is reported back to the agent as a notice, not rejected: agents are
+# deployed per shuttle and will legitimately run ahead of, or behind,
+# the portal. See docs/agent-protocol.md.
+SCHEMA_VERSION_SUPPORTED = "0.1"
+#
+# The AgentReport* models below are the master's half of the agent
+# contract (docs/agent-protocol.md). Everything an agent sends is
+# attacker-controlled input as far as this app is concerned: a shuttle
+# holds a token, not trust. Hence the explicit length and list-size
+# caps - without them a compromised or buggy agent could push unbounded
+# data straight into the database.
+
+
+class AgentJtagDevice(BaseModel):
+    idcode: str = Field(max_length=32)
+    name: str | None = Field(default=None, max_length=128)
+    kind: str | None = Field(default=None, max_length=64)
+
+
+class AgentJtagScan(BaseModel):
+    tool: str = Field(max_length=32)
+    ok: bool
+    # A chain can hold several parts (a Zynq reports its ARM core next to
+    # the fabric); 16 is far above anything real and well below abuse.
+    devices: list[AgentJtagDevice] = Field(default_factory=list, max_length=16)
+    error: str | None = Field(default=None, max_length=512)
+
+
+class AgentDevice(BaseModel):
+    kind: str = Field(max_length=32)
+    usb_vendor_id: str = Field(max_length=8)
+    usb_product_id: str = Field(max_length=8)
+    usb_serial: str | None = Field(default=None, max_length=128)
+    product: str | None = Field(default=None, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=255)
+    sysfs_path: str = Field(max_length=64)
+    signature: str | None = Field(default=None, max_length=64)
+    jtag: AgentJtagScan | None = None
+
+
+class AgentVideoDevice(BaseModel):
+    dev_node: str = Field(max_length=255)
+    card: str | None = Field(default=None, max_length=255)
+    driver: str | None = Field(default=None, max_length=64)
+    usb_serial: str | None = Field(default=None, max_length=128)
+    has_signal: bool | None = None
+
+
+class AgentReport(BaseModel):
+    # Agents and the master are deliberately allowed to run different
+    # versions, so unknown extra fields are ignored rather than rejected
+    # (pydantic's default) - a newer agent must not break an older
+    # master. A schema_version mismatch is surfaced as a warning by the
+    # ingest service instead of a hard failure.
+    schema_version: str = Field(max_length=16)
+    agent_version: str = Field(max_length=32)
+    hostname: str = Field(max_length=255)
+    scanned_at: str = Field(max_length=64)
+    machine_id: str | None = Field(default=None, max_length=64)
+    devices: list[AgentDevice] = Field(default_factory=list, max_length=64)
+    video: list[AgentVideoDevice] = Field(default_factory=list, max_length=64)
+    warnings: list[str] = Field(default_factory=list, max_length=64)
+
+
+class AgentReportAccepted(BaseModel):
+    success: bool = True
+    shuttle_id: int
+    devices_recorded: int
+    # Anything the master noticed about the report itself - a schema
+    # skew, a device it had to drop. Returned so the agent can log it
+    # rather than the finding dying in a server log nobody reads.
+    notices: list[str] = Field(default_factory=list)
+
+
+class DeviceOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    shuttle_id: int
+    kind: str
+    usb_vendor_id: str
+    usb_product_id: str
+    usb_serial: str | None
+    product: str | None
+    manufacturer: str | None
+    sysfs_path: str
+    signature: str | None
+    jtag_chain: list[dict] | None
+    has_video_signal: bool | None
+    is_present: bool
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
+class ShuttleOut(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    name: str
+    hostname: str | None
+    role: str
+    agent_version: str | None
+    last_report_at: datetime | None
+    created_at: datetime
+    # Derived, not stored: a node is online if it reported recently
+    # enough. See services/inventory.py::shuttle_status.
+    status: str
+    device_count: int
+
+
+class CreateShuttleRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    role: str = Field(default="worker", max_length=16)
+
+
+class ShuttleEnrolled(BaseModel):
+    success: bool = True
+    shuttle: ShuttleOut
+    # Shown exactly once. Only its hash is stored, so it cannot be
+    # recovered later - a lost token means issuing a new one.
+    token: str
+    message: str = (
+        "Store this token now - it is shown only once and cannot be retrieved later."
+    )

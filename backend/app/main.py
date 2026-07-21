@@ -14,7 +14,16 @@ from starlette.responses import FileResponse
 from app.config import settings
 from app.database import SessionLocal, engine
 from app.models import Lab
-from app.routers import admin, auth, hardware_proxy, labs, profile, reservations, stats
+from app.routers import (
+    admin,
+    auth,
+    hardware_proxy,
+    inventory,
+    labs,
+    profile,
+    reservations,
+    stats,
+)
 from app.services.admin import sync_all_admin_roles
 from app.services.queue import sweep_expired_reservations, sweep_logged_out_sessions
 
@@ -148,6 +157,12 @@ app.include_router(reservations.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
+# Agents post here with their own bearer token, not a user session -
+# see routers/inventory.py::authenticate_agent. The admin half is a
+# separate router so the two audiences' permissions never share a
+# dependency by accident.
+app.include_router(inventory.router, prefix="/api")
+app.include_router(inventory.admin_router, prefix="/api")
 
 # Not under /api: nginx now reverse-proxies /hw/{lab_id}/* and
 # /labfiles/* straight to CT300 itself (see
