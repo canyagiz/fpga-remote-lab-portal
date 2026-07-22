@@ -299,6 +299,22 @@ export interface Deployment {
   reason: string | null;
 }
 
+export interface DiscoveredHost {
+  ip: string;
+  mac: string | null;
+  vendor: string;
+  // "raspberry_pi" | "proxmox" | "host"
+  kind: string;
+  open_ports: number[];
+  note: string | null;
+}
+
+export interface ScanResult {
+  subnet: string;
+  duration_ms: number;
+  hosts: DiscoveredHost[];
+}
+
 export class ApiError extends Error {
   status: number;
   // Set from the response's Retry-After header when present (e.g. the

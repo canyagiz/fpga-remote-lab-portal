@@ -44,12 +44,14 @@ from app.schemas import (
     CreateShuttleRequest,
     DeploymentCreate,
     DeploymentOut,
+    DiscoveredHostOut,
     DeviceOut,
     GapReportOut,
     LabTemplateCreate,
     LabTemplateOut,
     MessageOut,
     RequirementResultOut,
+    ScanResultOut,
     ShuttleAddressUpdate,
     ShuttleEnrolled,
     ShuttleOut,
@@ -60,7 +62,7 @@ from app.security import (
     parse_shuttle_token,
     verify_shuttle_secret,
 )
-from app.services import deployments, inventory, matching
+from app.services import deployments, discovery, inventory, matching
 from app.services import requirements as requirements_module
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -528,6 +530,37 @@ def all_gaps(db: Session = Depends(get_db)):
     for template in db.scalars(select(LabTemplate).order_by(LabTemplate.id)):
         reports.extend(matching.evaluate_across_fleet(db, template))
     return [_gap_out(r) for r in reports]
+
+
+@admin_router.post("/scan", response_model=ScanResultOut)
+def scan_network(db: Session = Depends(get_db)):
+    """Discover what is on the lab network - the Raspberry Pis driving
+    board switches, other shuttles, any reachable host - the way a Wi-Fi
+    scan lists what is in range.
+
+    Read-only and admin-only (see the router dependency). Results are
+    annotated with what we already know: a Pi already assigned to a
+    board reads as that, an unassigned one that answers on the
+    io_interface port reads as usable for a GPIO endpoint.
+    """
+    shuttle_addr = {s.address: s.name for s in db.scalars(select(Shuttle)) if s.address}
+    gpio: dict[str, str] = {}
+    for board in db.scalars(select(Board)):
+        if board.gpio_endpoint:
+            gpio[board.gpio_endpoint.split(":")[0]] = board.label
+
+    result = discovery.scan(shuttle_addr, gpio)
+    return ScanResultOut(
+        subnet=result.subnet,
+        duration_ms=result.duration_ms,
+        hosts=[
+            DiscoveredHostOut(
+                ip=h.ip, mac=h.mac, vendor=h.vendor, kind=h.kind,
+                open_ports=h.open_ports, note=h.note,
+            )
+            for h in result.hosts
+        ],
+    )
 
 
 @admin_router.get("/unused", response_model=list[DeviceOut])

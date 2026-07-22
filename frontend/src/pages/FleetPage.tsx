@@ -16,6 +16,7 @@ import {
   Lab,
   LabRequirement,
   LabTemplate,
+  ScanResult,
   Shuttle,
   UnclaimedDevice,
 } from "../api/types";
@@ -32,11 +33,6 @@ function familyLabel(value: string): string {
   return FAMILIES.find((f) => f.value === value)?.label ?? value;
 }
 
-/** Manufacturer plus product, without saying the brand twice.
- *  Some devices already carry the vendor in their product string -
- *  Digilent's programmer reports manufacturer "Digilent" and product
- *  "Digilent Adept USB Device" - so joining them blindly reads as
- *  "Digilent Digilent Adept USB Device". */
 function describeDevice(manufacturer: string | null, product: string | null): string {
   const maker = manufacturer?.trim() ?? "";
   const name = product?.trim() ?? "";
@@ -47,26 +43,19 @@ function describeDevice(manufacturer: string | null, product: string | null): st
 
 function formatWhen(iso: string | null): string {
   if (!iso) return "never";
-  const then = new Date(iso).getTime();
-  const seconds = Math.round((Date.now() - then) / 1000);
+  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return "just now";
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** Shuttle liveness. "never_reported" is its own state, not an error -
- *  an enrolled shuttle whose agent has not been installed yet is a
- *  normal step in bringing one up, not a fault. */
 function StatusBadge({ status }: { status: string }) {
   if (status === "online") return <Badge variant="success">online</Badge>;
   if (status === "offline") return <Badge variant="destructive">offline</Badge>;
   return <Badge variant="outline">awaiting first report</Badge>;
 }
 
-/** The three requirement states. Kept visually distinct because they
- *  mean different things to whoever has to act: missing is "find one",
- *  degraded is "something here is broken". */
 function RequirementBadge({ status }: { status: string }) {
   if (status === "satisfied") return <Badge variant="success">ok</Badge>;
   if (status === "degraded") return <Badge variant="warning">degraded</Badge>;
@@ -83,6 +72,8 @@ function EmptyRow({ colSpan, children }: { colSpan: number; children: React.Reac
   );
 }
 
+type Section = "overview" | "shuttles" | "boards" | "labs" | "deployments" | "discovery";
+
 export default function FleetPage() {
   const { showError, showSuccess } = useToast();
 
@@ -97,9 +88,10 @@ export default function FleetPage() {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
-  // The enrolment token is returned once and never again, so it is held
-  // in a modal until the admin dismisses it rather than shown in a toast
-  // that could scroll away unread.
+  const [section, setSection] = useState<Section>("overview");
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+
   const [issuedToken, setIssuedToken] = useState<{ name: string; token: string } | null>(null);
   const [claiming, setClaiming] = useState<UnclaimedDevice | null>(null);
   const [newShuttleName, setNewShuttleName] = useState("");
@@ -133,9 +125,6 @@ export default function FleetPage() {
 
   useEffect(() => {
     refresh();
-    // Agents report every 30s, so the page follows at the same cadence -
-    // without this an admin watching for a board they just plugged in
-    // would sit on a stale screen and reasonably conclude nothing worked.
     const timer = setInterval(refresh, 30_000);
     return () => clearInterval(timer);
   }, []);
@@ -180,7 +169,7 @@ export default function FleetPage() {
     const address = prompt(
       `Address where ${shuttle.name}'s lab containers are reached (e.g. 10.30.70.23).\n\n` +
         `This is what student browsers are sent to, which is why it is set here rather than taken from the agent's own report.`,
-      "",
+      shuttle.address ?? "",
     );
     if (!address?.trim()) return;
     setBusy(`addr-${shuttle.id}`);
@@ -214,8 +203,7 @@ export default function FleetPage() {
       .map((d, i) => `${i + 1}. ${d.usb_serial} (${describeDevice(d.manufacturer, d.product)})`)
       .join("\n");
     const answer = prompt(
-      `Which capture card watches ${board.label}?\n\n${options}\n\n` +
-        `Enter the number, or 0 for none.`,
+      `Which capture card watches ${board.label}?\n\n${options}\n\n` + `Enter the number, or 0 for none.`,
       "1",
     );
     if (answer === null) return;
@@ -225,7 +213,6 @@ export default function FleetPage() {
     setBusy(`board-${board.id}`);
     try {
       await api.updateBoard(board.id, {
-        // Empty string clears it; a serial sets it.
         video_capture_serial: index === 0 ? "" : (captureDevices[index - 1].usb_serial ?? ""),
       });
       showSuccess(`${board.label} updated`);
@@ -237,13 +224,27 @@ export default function FleetPage() {
     }
   }
 
+  async function handleSetGpio(board: Board, suggested?: string) {
+    const endpoint = prompt(
+      `GPIO controller (Raspberry Pi) endpoint for ${board.label}, e.g. 10.30.70.50:20000.\n\n` +
+        `Leave blank to clear.`,
+      suggested ?? board.gpio_endpoint ?? "",
+    );
+    if (endpoint === null) return;
+    setBusy(`board-${board.id}`);
+    try {
+      await api.updateBoard(board.id, { gpio_endpoint: endpoint.trim() || "" });
+      showSuccess(`${board.label} updated`);
+      await refresh();
+    } catch (err) {
+      showError(err instanceof api.ApiError ? err.message : "Failed to update board");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleDeleteTemplate(template: LabTemplate) {
-    if (
-      !confirm(
-        `Delete template "${template.name}"? Any lab bound to it must be unbound first.`,
-      )
-    )
-      return;
+    if (!confirm(`Delete template "${template.name}"? Any lab bound to it must be unbound first.`)) return;
     setBusy(`tpl-${template.id}`);
     try {
       await api.deleteTemplate(template.id);
@@ -257,8 +258,7 @@ export default function FleetPage() {
   }
 
   async function handleDeleteBoard(board: Board) {
-    if (!confirm(`Deregister "${board.label}"? The hardware stays; only its registration is removed.`))
-      return;
+    if (!confirm(`Deregister "${board.label}"? The hardware stays; only its registration is removed.`)) return;
     setBusy(`board-${board.id}`);
     try {
       await api.deleteBoard(board.id);
@@ -308,611 +308,721 @@ export default function FleetPage() {
     }
   }
 
+  async function handleScan() {
+    setScanning(true);
+    try {
+      setScan(await api.scanNetwork());
+    } catch (err) {
+      showError(err instanceof api.ApiError ? err.message : "Scan failed");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   const captureDevices = devices.filter((d) => d.kind === "video_capture");
-  // Suggestions for the programmer field: what the fleet is actually
-  // reporting, so an operator does not have to remember the exact spelling.
   const knownSignatures = Array.from(
-    new Set(
-      devices
-        .filter((d) => d.kind === "programmer" && d.signature)
-        .map((d) => d.signature as string),
-    ),
+    new Set(devices.filter((d) => d.kind === "programmer" && d.signature).map((d) => d.signature as string)),
   ).sort();
   const onlineCount = shuttles.filter((s) => s.status === "online").length;
   const blockedGaps = gaps.filter((g) => !g.deployable);
+  const readyLabs = gaps.filter((g) => g.deployable).length;
+  const withdrawn = deployments.filter((d) => !d.available);
+
+  // The one list that makes the overview worth opening: everything that
+  // wants a human, each linking to the section where it is fixed.
+  const attention: { text: string; section: Section }[] = [];
+  unclaimed.forEach((u) =>
+    attention.push({ text: `New hardware on ${u.shuttle_name}: ${u.usb_serial} — register it as a board`, section: "shuttles" }),
+  );
+  shuttles.filter((s) => s.status === "offline").forEach((s) => attention.push({ text: `${s.name} has stopped reporting`, section: "shuttles" }));
+  shuttles.filter((s) => !s.address).forEach((s) => attention.push({ text: `${s.name} has no address set`, section: "shuttles" }));
+  boards.filter((b) => !b.video_capture_serial).forEach((b) => attention.push({ text: `${b.label} has no capture card recorded`, section: "boards" }));
+  blockedGaps.forEach((g) =>
+    attention.push({ text: `${g.template_name} on ${g.shuttle_name}: ${g.missing_count} unmet requirement${g.missing_count === 1 ? "" : "s"}`, section: "labs" }),
+  );
+  withdrawn.forEach((d) => attention.push({ text: `${d.lab_name} withdrawn — ${d.reason}`, section: "deployments" }));
+
+  const NAV: { id: Section; label: string; badge?: number; alert?: boolean }[] = [
+    { id: "overview", label: "Overview", badge: attention.length || undefined, alert: attention.length > 0 },
+    { id: "shuttles", label: "Shuttles", badge: shuttles.length || undefined, alert: unclaimed.length > 0 },
+    { id: "boards", label: "Boards", badge: boards.length || undefined },
+    { id: "labs", label: "Labs", badge: templates.length || undefined, alert: blockedGaps.length > 0 },
+    { id: "deployments", label: "Deployments", badge: deployments.length || undefined, alert: withdrawn.length > 0 },
+    { id: "discovery", label: "Discovery" },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-10">
+    <div className="mx-auto max-w-6xl px-6 py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Fleet</h1>
-        <Link
-          to="/admin/fleet/graph"
-          className="text-sm font-medium text-muted-foreground hover:text-foreground"
-        >
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Fleet</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {shuttles.length} shuttle{shuttles.length === 1 ? "" : "s"} ({onlineCount} online) ·{" "}
+            {boards.length} board{boards.length === 1 ? "" : "s"} · {readyLabs}/{gaps.length || 0} labs ready
+          </p>
+        </div>
+        <Link to="/admin/fleet/graph" className="text-sm font-medium text-muted-foreground hover:text-foreground">
           Topology view →
         </Link>
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {shuttles.length} shuttle{shuttles.length === 1 ? "" : "s"} ({onlineCount} online) ·{" "}
-        {devices.length} device{devices.length === 1 ? "" : "s"} attached · {boards.length} registered
-        board{boards.length === 1 ? "" : "s"}
-      </p>
 
-      {/* New hardware waiting for a human. Deliberately first on the page:
-          it is the only section that represents someone standing at a
-          machine waiting for a response. */}
-      {unclaimed.length > 0 && (
-        <Card className="mt-6 border-warning-muted-foreground/40">
-          <CardHeader>
-            <CardTitle>
-              New hardware detected
-              <Badge variant="warning" className="ml-2">
-                {unclaimed.length}
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              A programmer is attached that no board claims yet. An IDCODE identifies the chip, not
-              the board it sits on — so which board this is has to be recorded by a person, once.
-            </p>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Serial</TableHead>
-                    <TableHead>Device</TableHead>
-                    <TableHead>Shuttle</TableHead>
-                    <TableHead>JTAG</TableHead>
-                    <TableHead>Seen</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {unclaimed.map((d) => (
-                    <TableRow key={d.device_id}>
-                      <TableCell className="font-mono text-xs">{d.usb_serial}</TableCell>
-                      <TableCell>
-                        {describeDevice(d.manufacturer, d.product)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{d.shuttle_name}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {d.jtag_chain?.length
-                          ? d.jtag_chain.map((c) => c.idcode).join(", ")
-                          : "not probed"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatWhen(d.first_seen_at)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button size="sm" onClick={() => setClaiming(d)}>
-                          Register as board
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Shuttles */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Shuttles</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Address</TableHead>
-                  <TableHead>Devices</TableHead>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Last report</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {shuttles.length === 0 ? (
-                  <EmptyRow colSpan={7}>
-                    No shuttles yet. Enrol one below, then install the agent on it.
-                  </EmptyRow>
-                ) : (
-                  shuttles.map((s) => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium">
-                        {s.name}
-                        {s.role === "master" && (
-                          <Badge variant="outline" className="ml-2">
-                            master
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={s.status} />
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {/* The admin-set address, not the agent's
-                            self-reported hostname - this column drives
-                            where students are sent, so it has to show
-                            the value that actually does that. Hostname
-                            sits underneath as a diagnostic. */}
-                        {s.address ? (
-                          s.address
-                        ) : (
-                          <span className="text-warning-muted-foreground">not set</span>
-                        )}
-                        {s.hostname && (
-                          <span className="block text-[10px] text-muted-foreground">
-                            {s.hostname}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>{s.device_count}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {s.agent_version ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatWhen(s.last_report_at)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy === `addr-${s.id}`}
-                            onClick={() => handleAddress(s)}
-                          >
-                            Set address
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy === `rotate-${s.id}`}
-                            onClick={() => handleRotate(s)}
-                          >
-                            New token
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={busy === `del-${s.id}`}
-                            onClick={() => handleRemoveShuttle(s)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+      <div className="mt-6 flex flex-col gap-6 md:flex-row">
+        {/* Sidebar */}
+        <nav className="flex shrink-0 gap-1 overflow-x-auto md:w-48 md:flex-col md:overflow-visible">
+          {NAV.map((item) => {
+            const active = section === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setSection(item.id)}
+                className={`flex items-center justify-between gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  active ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  {item.alert && (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--warning)" }} />
+                  )}
+                  {item.label}
+                </span>
+                {item.badge != null && (
+                  <span className="rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground">
+                    {item.badge}
+                  </span>
                 )}
-              </TableBody>
-            </Table>
-          </div>
+              </button>
+            );
+          })}
+        </nav>
 
-          <form onSubmit={handleEnrol} className="mt-4 flex flex-wrap items-end gap-2">
-            <div className="grow">
-              <Label htmlFor="shuttle-name">Enrol a shuttle</Label>
-              <Input
-                id="shuttle-name"
-                value={newShuttleName}
-                onChange={(e) => setNewShuttleName(e.target.value)}
-                placeholder="pc-3vrl07"
-              />
-            </div>
-            <Button type="submit" disabled={busy === "enrol" || !newShuttleName.trim()}>
-              Enrol
-            </Button>
-          </form>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Enrolling issues an agent token, shown once. A machine cannot add itself to the fleet.
-          </p>
-        </CardContent>
-      </Card>
+        {/* Detail pane */}
+        <div className="min-w-0 flex-1 space-y-6">
+          {/* -------------------------------- Overview -------------------------------- */}
+          {section === "overview" && (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Tile label="Shuttles" value={`${onlineCount}/${shuttles.length}`} sub="online" onClick={() => setSection("shuttles")} />
+                <Tile label="Boards" value={String(boards.length)} sub="registered" onClick={() => setSection("boards")} />
+                <Tile label="Labs ready" value={`${readyLabs}/${gaps.length || 0}`} sub="deployable" onClick={() => setSection("labs")} />
+                <Tile
+                  label="Attention"
+                  value={String(attention.length)}
+                  sub={attention.length ? "to resolve" : "all clear"}
+                  alert={attention.length > 0}
+                />
+              </div>
 
-      {/* Lab templates. Placed before readiness deliberately: this is
-          where the question gets asked, and the next card is the answer. */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Lab templates</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="mb-3 text-sm text-muted-foreground">
-            A template states what a lab needs, once. The system keeps comparing it against every
-            shuttle — nothing here installs or configures anything, it only describes.
-          </p>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Requires</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {templates.length === 0 ? (
-                  <EmptyRow colSpan={3}>
-                    No templates yet. Until one exists there is nothing to check hardware against.
-                  </EmptyRow>
-                ) : (
-                  templates.map((t) => (
-                    <TableRow key={t.id}>
-                      <TableCell>
-                        <div className="font-medium">{t.name}</div>
-                        {t.description && (
-                          <div className="text-xs text-muted-foreground">{t.description}</div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1.5">
-                          {t.requirements.map((r, i) => {
-                            const d = describeRequirement(r);
-                            return (
-                              <Badge key={i} variant="outline" title={d.detail}>
-                                {d.label}: {d.detail}
-                              </Badge>
-                            );
-                          })}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          disabled={busy === `tpl-${t.id}`}
-                          onClick={() => handleDeleteTemplate(t)}
-                        >
-                          Delete
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Needs attention</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {attention.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      Nothing to resolve — every shuttle is reporting, every board is complete, and no lab is blocked.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {attention.map((a, i) => (
+                        <li key={i}>
+                          <button
+                            onClick={() => setSection(a.section)}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-secondary/60"
+                          >
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--warning)" }} />
+                            <span className="flex-1">{a.text}</span>
+                            <span className="text-xs text-muted-foreground">{a.section} →</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </Card>
 
-          <TemplateForm signatures={knownSignatures} onDone={refresh} />
-        </CardContent>
-      </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Find hardware on the network</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    Scan the lab network for Raspberry Pis and shuttles — like a Wi-Fi scan, for wiring things up.
+                  </p>
+                  <Button size="sm" onClick={() => setSection("discovery")}>
+                    Open Discovery →
+                  </Button>
+                </CardContent>
+              </Card>
+            </>
+          )}
 
-      {/* What each lab still needs */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>
-            Lab readiness
-            {blockedGaps.length > 0 && (
-              <Badge variant="destructive" className="ml-2">
-                {blockedGaps.length} blocked
-              </Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {gaps.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              No lab templates defined yet — a template says what a lab requires, and this is where
-              the answer to "what is missing" appears.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {gaps.map((g) => (
-                <div key={`${g.template_id}-${g.shuttle_id}`} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="font-medium">
-                      {g.template_name}
-                      <span className="text-muted-foreground"> on {g.shuttle_name}</span>
+          {/* -------------------------------- Shuttles -------------------------------- */}
+          {section === "shuttles" && (
+            <>
+              {unclaimed.length > 0 && (
+                <Card className="border-warning-muted-foreground/40">
+                  <CardHeader>
+                    <CardTitle>
+                      New hardware detected
+                      <Badge variant="warning" className="ml-2">
+                        {unclaimed.length}
+                      </Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="mb-3 text-sm text-muted-foreground">
+                      A programmer is attached that no board claims yet. An IDCODE identifies the chip, not the board
+                      it sits on — so which board this is has to be recorded by a person, once.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Serial</TableHead>
+                            <TableHead>Device</TableHead>
+                            <TableHead>Shuttle</TableHead>
+                            <TableHead>JTAG</TableHead>
+                            <TableHead>Seen</TableHead>
+                            <TableHead />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {unclaimed.map((d) => (
+                            <TableRow key={d.device_id}>
+                              <TableCell className="font-mono text-xs">{d.usb_serial}</TableCell>
+                              <TableCell>{describeDevice(d.manufacturer, d.product)}</TableCell>
+                              <TableCell className="text-muted-foreground">{d.shuttle_name}</TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">
+                                {d.jtag_chain?.length ? d.jtag_chain.map((c) => c.idcode).join(", ") : "not probed"}
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">{formatWhen(d.first_seen_at)}</TableCell>
+                              <TableCell className="text-right">
+                                <Button size="sm" onClick={() => setClaiming(d)}>
+                                  Register as board
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
                     </div>
-                    {g.deployable ? (
-                      <Badge variant="success">deployable</Badge>
-                    ) : (
-                      <Badge variant="destructive">
-                        {g.missing_count} unmet requirement{g.missing_count === 1 ? "" : "s"}
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Shuttles</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Address</TableHead>
+                          <TableHead>Devices</TableHead>
+                          <TableHead>Agent</TableHead>
+                          <TableHead>Last report</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {shuttles.length === 0 ? (
+                          <EmptyRow colSpan={7}>No shuttles yet. Enrol one below, then install the agent on it.</EmptyRow>
+                        ) : (
+                          shuttles.map((s) => (
+                            <TableRow key={s.id}>
+                              <TableCell className="font-medium">
+                                {s.name}
+                                {s.role === "master" && (
+                                  <Badge variant="outline" className="ml-2">
+                                    master
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <StatusBadge status={s.status} />
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">
+                                {s.address ? s.address : <span className="text-warning-muted-foreground">not set</span>}
+                                {s.hostname && <span className="block text-[10px] text-muted-foreground">{s.hostname}</span>}
+                              </TableCell>
+                              <TableCell>{s.device_count}</TableCell>
+                              <TableCell className="text-muted-foreground">{s.agent_version ?? "—"}</TableCell>
+                              <TableCell className="text-muted-foreground">{formatWhen(s.last_report_at)}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" variant="secondary" disabled={busy === `addr-${s.id}`} onClick={() => handleAddress(s)}>
+                                    Set address
+                                  </Button>
+                                  <Button size="sm" variant="secondary" disabled={busy === `rotate-${s.id}`} onClick={() => handleRotate(s)}>
+                                    New token
+                                  </Button>
+                                  <Button size="sm" variant="destructive" disabled={busy === `del-${s.id}`} onClick={() => handleRemoveShuttle(s)}>
+                                    Remove
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <form onSubmit={handleEnrol} className="mt-4 flex flex-wrap items-end gap-2">
+                    <div className="grow">
+                      <Label htmlFor="shuttle-name">Enrol a shuttle</Label>
+                      <Input id="shuttle-name" value={newShuttleName} onChange={(e) => setNewShuttleName(e.target.value)} placeholder="pc-3vrl07" />
+                    </div>
+                    <Button type="submit" disabled={busy === "enrol" || !newShuttleName.trim()}>
+                      Enrol
+                    </Button>
+                  </form>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Enrolling issues an agent token, shown once. A machine cannot add itself to the fleet.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Attached hardware</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Serial</TableHead>
+                          <TableHead>Device</TableHead>
+                          <TableHead>Role</TableHead>
+                          <TableHead>Port</TableHead>
+                          <TableHead>Used by</TableHead>
+                          <TableHead>Health</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {devices.length === 0 ? (
+                          <EmptyRow colSpan={6}>
+                            Nothing reported yet. An enrolled shuttle only appears here once its agent is installed and running.
+                          </EmptyRow>
+                        ) : (
+                          devices.map((d) => {
+                            const board = boards.find(
+                              (b) => b.programmer_serial === d.usb_serial || b.video_capture_serial === d.usb_serial,
+                            );
+                            return (
+                              <TableRow key={d.id}>
+                                <TableCell className="font-mono text-xs">
+                                  {d.usb_serial ?? <span className="text-muted-foreground">none</span>}
+                                </TableCell>
+                                <TableCell>{describeDevice(d.manufacturer, d.product)}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline">{d.kind.replace("_", " ")}</Badge>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-muted-foreground">{d.sysfs_path}</TableCell>
+                                <TableCell>
+                                  {board ? board.label : <span className="text-muted-foreground">not claimed</span>}
+                                </TableCell>
+                                <TableCell>
+                                  {d.kind !== "video_capture" ? (
+                                    <span className="text-muted-foreground">—</span>
+                                  ) : d.has_video_signal === true ? (
+                                    <Badge variant="success">signal</Badge>
+                                  ) : d.has_video_signal === false ? (
+                                    <Badge variant="destructive">no signal</Badge>
+                                  ) : (
+                                    <Badge variant="outline">unknown</Badge>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {/* -------------------------------- Boards -------------------------------- */}
+          {section === "boards" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Boards</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Label</TableHead>
+                        <TableHead>Family</TableHead>
+                        <TableHead>Programmer serial</TableHead>
+                        <TableHead>Currently on</TableHead>
+                        <TableHead>Capture</TableHead>
+                        <TableHead>GPIO</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {boards.length === 0 ? (
+                        <EmptyRow colSpan={7}>No boards registered. They appear here once you claim a detected programmer.</EmptyRow>
+                      ) : (
+                        boards.map((b) => (
+                          <TableRow key={b.id}>
+                            <TableCell className="font-medium">{b.label}</TableCell>
+                            <TableCell>{familyLabel(b.family)}</TableCell>
+                            <TableCell className="font-mono text-xs">{b.programmer_serial}</TableCell>
+                            <TableCell>
+                              {b.shuttle_name ? b.shuttle_name : <span className="text-muted-foreground">not attached</span>}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {b.video_capture_serial ?? <span className="text-warning-muted-foreground">not set</span>}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">{b.gpio_endpoint ?? "—"}</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button size="sm" variant="secondary" disabled={busy === `board-${b.id}` || captureDevices.length === 0} onClick={() => handleSetCapture(b)}>
+                                  Set capture
+                                </Button>
+                                <Button size="sm" variant="secondary" disabled={busy === `board-${b.id}`} onClick={() => handleSetGpio(b)}>
+                                  Set GPIO
+                                </Button>
+                                <Button size="sm" variant="destructive" disabled={busy === `board-${b.id}`} onClick={() => handleDeleteBoard(b)}>
+                                  Deregister
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* -------------------------------- Labs -------------------------------- */}
+          {section === "labs" && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Lab templates</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    A template states what a lab needs, once. The system keeps comparing it against every shuttle —
+                    nothing here installs or configures anything, it only describes.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Requires</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {templates.length === 0 ? (
+                          <EmptyRow colSpan={3}>No templates yet. Until one exists there is nothing to check hardware against.</EmptyRow>
+                        ) : (
+                          templates.map((t) => (
+                            <TableRow key={t.id}>
+                              <TableCell>
+                                <div className="font-medium">{t.name}</div>
+                                {t.description && <div className="text-xs text-muted-foreground">{t.description}</div>}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {t.requirements.map((r, i) => {
+                                    const d = describeRequirement(r);
+                                    return (
+                                      <Badge key={i} variant="outline" title={d.detail}>
+                                        {d.label}: {d.detail}
+                                      </Badge>
+                                    );
+                                  })}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button size="sm" variant="destructive" disabled={busy === `tpl-${t.id}`} onClick={() => handleDeleteTemplate(t)}>
+                                  Delete
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <TemplateForm signatures={knownSignatures} onDone={refresh} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    Lab readiness
+                    {blockedGaps.length > 0 && (
+                      <Badge variant="destructive" className="ml-2">
+                        {blockedGaps.length} blocked
                       </Badge>
                     )}
-                  </div>
-                  <ul className="mt-3 space-y-1.5">
-                    {g.results.map((r, i) => (
-                      <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
-                        <RequirementBadge status={r.status} />
-                        <span className="font-mono text-xs text-muted-foreground">{r.type}</span>
-                        <span
-                          className={
-                            r.status === "satisfied" ? "text-muted-foreground" : "text-foreground"
-                          }
-                        >
-                          {r.message}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Everything the agents can see, board or not. Without this the
-          capture cards and any other supporting hardware are recorded but
-          invisible - they are not boards, so the Boards table has no row
-          for them, and they are not programmers, so the claim queue never
-          lists them. */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Attached hardware</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Serial</TableHead>
-                  <TableHead>Device</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Port</TableHead>
-                  <TableHead>Used by</TableHead>
-                  <TableHead>Health</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {devices.length === 0 ? (
-                  <EmptyRow colSpan={6}>
-                    Nothing reported yet. An enrolled shuttle only appears here once its
-                    agent is installed and running.
-                  </EmptyRow>
-                ) : (
-                  devices.map((d) => {
-                    const board = boards.find(
-                      (b) =>
-                        b.programmer_serial === d.usb_serial ||
-                        b.video_capture_serial === d.usb_serial,
-                    );
-                    return (
-                      <TableRow key={d.id}>
-                        <TableCell className="font-mono text-xs">
-                          {d.usb_serial ?? <span className="text-muted-foreground">none</span>}
-                        </TableCell>
-                        <TableCell>{describeDevice(d.manufacturer, d.product)}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{d.kind.replace("_", " ")}</Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">
-                          {d.sysfs_path}
-                        </TableCell>
-                        <TableCell>
-                          {board ? (
-                            board.label
-                          ) : (
-                            <span className="text-muted-foreground">not claimed</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {/* Only capture cards report a signal. For anything
-                              else this is genuinely not applicable, which is
-                              different from unknown. */}
-                          {d.kind !== "video_capture" ? (
-                            <span className="text-muted-foreground">—</span>
-                          ) : d.has_video_signal === true ? (
-                            <Badge variant="success">signal</Badge>
-                          ) : d.has_video_signal === false ? (
-                            <Badge variant="destructive">no signal</Badge>
-                          ) : (
-                            <Badge variant="outline">unknown</Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Registered boards */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Boards</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Label</TableHead>
-                  <TableHead>Family</TableHead>
-                  <TableHead>Programmer serial</TableHead>
-                  <TableHead>Currently on</TableHead>
-                  <TableHead>Capture</TableHead>
-                  <TableHead>GPIO</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {boards.length === 0 ? (
-                  <EmptyRow colSpan={7}>
-                    No boards registered. They appear here once you claim a detected programmer.
-                  </EmptyRow>
-                ) : (
-                  boards.map((b) => (
-                    <TableRow key={b.id}>
-                      <TableCell className="font-medium">{b.label}</TableCell>
-                      <TableCell>{familyLabel(b.family)}</TableCell>
-                      <TableCell className="font-mono text-xs">{b.programmer_serial}</TableCell>
-                      <TableCell>
-                        {b.shuttle_name ? (
-                          b.shuttle_name
-                        ) : (
-                          <span className="text-muted-foreground">not attached</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {/* Flagged rather than left blank: a board with no
-                            capture card recorded cannot have its video
-                            verified, which blocks any lab that needs one. */}
-                        {b.video_capture_serial ?? (
-                          <span className="text-warning-muted-foreground">not set</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {b.gpio_endpoint ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy === `board-${b.id}` || captureDevices.length === 0}
-                            onClick={() => handleSetCapture(b)}
-                          >
-                            Set capture
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={busy === `board-${b.id}`}
-                            onClick={() => handleDeleteBoard(b)}
-                          >
-                            Deregister
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Deployments */}
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Deployments</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="mb-3 text-sm text-muted-foreground">
-            A deployment binds a catalogue entry to a real board. Until a lab has one it keeps its
-            static address and is listed exactly as before — and unbinding returns it to that state.
-          </p>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lab</TableHead>
-                  <TableHead>Board</TableHead>
-                  <TableHead>Resolved address</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deployments.length === 0 ? (
-                  <EmptyRow colSpan={5}>
-                    No labs are bound to a board yet, so every lab still uses its static address.
-                  </EmptyRow>
-                ) : (
-                  deployments.map((d) => (
-                    <TableRow key={d.id}>
-                      <TableCell className="font-medium">{d.lab_name}</TableCell>
-                      <TableCell>
-                        {d.board_label}
-                        <span className="text-muted-foreground"> :{d.port}</span>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {d.backend_url ?? <span className="text-muted-foreground">unresolved</span>}
-                      </TableCell>
-                      <TableCell>
-                        {d.available ? (
-                          <Badge variant="success">serving</Badge>
-                        ) : (
-                          <div className="flex flex-col gap-1">
-                            <Badge variant="destructive" className="w-fit">
-                              withdrawn
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">{d.reason}</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {gaps.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      No lab templates defined yet — a template says what a lab requires, and this is where the answer to
+                      "what is missing" appears.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {gaps.map((g) => (
+                        <div key={`${g.template_id}-${g.shuttle_id}`} className="rounded-lg border p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium">
+                              {g.template_name}
+                              <span className="text-muted-foreground"> on {g.shuttle_name}</span>
+                            </div>
+                            {g.deployable ? (
+                              <Badge variant="success">deployable</Badge>
+                            ) : (
+                              <Badge variant="destructive">
+                                {g.missing_count} unmet requirement{g.missing_count === 1 ? "" : "s"}
+                              </Badge>
+                            )}
                           </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={busy === `dep-${d.id}`}
-                            onClick={() => handleToggleDeployment(d)}
-                          >
-                            {d.is_enabled ? "Pause" : "Resume"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={busy === `dep-${d.id}`}
-                            onClick={() => handleUnbind(d)}
-                          >
-                            Unbind
-                          </Button>
+                          <ul className="mt-3 space-y-1.5">
+                            {g.results.map((r, i) => (
+                              <li key={i} className="flex flex-wrap items-center gap-2 text-sm">
+                                <RequirementBadge status={r.status} />
+                                <span className="font-mono text-xs text-muted-foreground">{r.type}</span>
+                                <span className={r.status === "satisfied" ? "text-muted-foreground" : "text-foreground"}>
+                                  {r.message}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {/* -------------------------------- Deployments -------------------------------- */}
+          {section === "deployments" && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Deployments</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    A deployment binds a catalogue entry to a real board. Until a lab has one it keeps its static address
+                    and is listed exactly as before — and unbinding returns it to that state.
+                  </p>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Lab</TableHead>
+                          <TableHead>Board</TableHead>
+                          <TableHead>Resolved address</TableHead>
+                          <TableHead>State</TableHead>
+                          <TableHead />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {deployments.length === 0 ? (
+                          <EmptyRow colSpan={5}>No labs are bound to a board yet, so every lab still uses its static address.</EmptyRow>
+                        ) : (
+                          deployments.map((d) => (
+                            <TableRow key={d.id}>
+                              <TableCell className="font-medium">{d.lab_name}</TableCell>
+                              <TableCell>
+                                {d.board_label}
+                                <span className="text-muted-foreground"> :{d.port}</span>
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">
+                                {d.backend_url ?? <span className="text-muted-foreground">unresolved</span>}
+                              </TableCell>
+                              <TableCell>
+                                {d.available ? (
+                                  <Badge variant="success">serving</Badge>
+                                ) : (
+                                  <div className="flex flex-col gap-1">
+                                    <Badge variant="destructive" className="w-fit">
+                                      withdrawn
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground">{d.reason}</span>
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" variant="secondary" disabled={busy === `dep-${d.id}`} onClick={() => handleToggleDeployment(d)}>
+                                    {d.is_enabled ? "Pause" : "Resume"}
+                                  </Button>
+                                  <Button size="sm" variant="destructive" disabled={busy === `dep-${d.id}`} onClick={() => handleUnbind(d)}>
+                                    Unbind
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <DeploymentForm labs={labs} templates={templates} boards={boards} deployments={deployments} onDone={refresh} />
+                </CardContent>
+              </Card>
+
+              {unused.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Unused hardware</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="mb-3 text-sm text-muted-foreground">
+                      Attached, but no lab template asks for it — worth knowing before anyone buys another.
+                    </p>
+                    <ul className="space-y-1 text-sm">
+                      {unused.map((d) => (
+                        <li key={d.id} className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs">{d.usb_serial ?? d.sysfs_path}</span>
+                          <span className="text-muted-foreground">{describeDevice(d.manufacturer, d.product)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+
+          {/* -------------------------------- Discovery -------------------------------- */}
+          {section === "discovery" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Discovery</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="max-w-xl text-sm text-muted-foreground">
+                    Scan the lab network for what isn't a USB device — the Raspberry Pis that drive board switches, other
+                    shuttles, any reachable host. Read-only; it only opens and closes a connection, nothing is sent.
+                  </p>
+                  <Button onClick={handleScan} disabled={scanning}>
+                    {scanning ? "Scanning…" : scan ? "Scan again" : "Scan network"}
+                  </Button>
+                </div>
+
+                {scan && (
+                  <>
+                    <p className="mt-4 text-xs text-muted-foreground">
+                      {scan.subnet} · {scan.hosts.length} host{scan.hosts.length === 1 ? "" : "s"} · {scan.duration_ms} ms
+                    </p>
+                    <div className="mt-2 overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Address</TableHead>
+                            <TableHead>What</TableHead>
+                            <TableHead>Open ports</TableHead>
+                            <TableHead>MAC</TableHead>
+                            <TableHead>Note</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {scan.hosts.map((h) => (
+                            <TableRow key={h.ip}>
+                              <TableCell className="font-mono text-xs">{h.ip}</TableCell>
+                              <TableCell>
+                                <KindBadge kind={h.kind} />
+                                <span className="ml-2 text-xs text-muted-foreground">{h.vendor}</span>
+                              </TableCell>
+                              <TableCell className="font-mono text-xs text-muted-foreground">
+                                {h.open_ports.length ? h.open_ports.join(", ") : "—"}
+                              </TableCell>
+                              <TableCell className="font-mono text-[10px] text-muted-foreground">{h.mac ?? "—"}</TableCell>
+                              <TableCell className="text-xs">
+                                {h.note ? <span className="text-foreground">{h.note}</span> : <span className="text-muted-foreground">—</span>}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      A Pi flagged "usable as a GPIO endpoint" can be wired to a board from the Boards section with Set GPIO.
+                    </p>
+                  </>
                 )}
-              </TableBody>
-            </Table>
-          </div>
 
-          <DeploymentForm
-            labs={labs}
-            templates={templates}
-            boards={boards}
-            deployments={deployments}
-            onDone={refresh}
-          />
-        </CardContent>
-      </Card>
+                {!scan && !scanning && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    No scan yet. It takes a couple of seconds and only touches the portal's own subnet.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
 
-      {/* Spare hardware */}
-      {unused.length > 0 && (
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Unused hardware</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-3 text-sm text-muted-foreground">
-              Attached, but no lab template asks for it — worth knowing before anyone buys another.
-            </p>
-            <ul className="space-y-1 text-sm">
-              {unused.map((d) => (
-                <li key={d.id} className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-xs">{d.usb_serial ?? d.sysfs_path}</span>
-                  <span className="text-muted-foreground">
-                    {describeDevice(d.manufacturer, d.product)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-
-      <ClaimBoardDialog
-        device={claiming}
-        captureOptions={captureDevices}
-        onClose={() => setClaiming(null)}
-        onDone={refresh}
-      />
+      <ClaimBoardDialog device={claiming} captureOptions={captureDevices} onClose={() => setClaiming(null)} onDone={refresh} />
       <TokenDialog issued={issuedToken} onClose={() => setIssuedToken(null)} />
     </div>
   );
+}
+
+function Tile({
+  label,
+  value,
+  sub,
+  alert,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  alert?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={!onClick}
+      className={`rounded-xl border bg-card p-4 text-left transition-colors ${onClick ? "hover:border-ring/60" : ""}`}
+    >
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <span className="text-2xl font-bold tabular-nums" style={alert ? { color: "var(--warning)" } : undefined}>
+          {value}
+        </span>
+        <span className="text-xs text-muted-foreground">{sub}</span>
+      </div>
+    </button>
+  );
+}
+
+function KindBadge({ kind }: { kind: string }) {
+  if (kind === "raspberry_pi") return <Badge variant="success">Raspberry Pi</Badge>;
+  if (kind === "proxmox") return <Badge variant="secondary">Proxmox</Badge>;
+  return <Badge variant="outline">Host</Badge>;
 }
 
 /** Shown once, and only once — the server keeps a hash, so this value
@@ -932,23 +1042,16 @@ function TokenDialog({
           <>
             <h2 className="text-lg font-semibold">Agent token for {issued.name}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Copy this now. Only its hash is stored, so it cannot be shown again — a lost token has
-              to be replaced with a new one.
+              Copy this now. Only its hash is stored, so it cannot be shown again — a lost token has to be replaced with a
+              new one.
             </p>
-            <pre className="mt-3 overflow-x-auto rounded-md border bg-muted p-3 font-mono text-xs">
-              {issued.token}
-            </pre>
+            <pre className="mt-3 overflow-x-auto rounded-md border bg-muted p-3 font-mono text-xs">{issued.token}</pre>
             <p className="mt-3 text-sm text-muted-foreground">
-              Put it in <code className="font-mono text-xs">/etc/fpga-lab-agent/agent.conf</code> on
-              that machine, then start <code className="font-mono text-xs">fpga-lab-agent</code>.
+              Put it in <code className="font-mono text-xs">/etc/fpga-lab-agent/agent.conf</code> on that machine, then
+              start <code className="font-mono text-xs">fpga-lab-agent</code>.
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  navigator.clipboard?.writeText(issued.token);
-                }}
-              >
+              <Button variant="secondary" onClick={() => navigator.clipboard?.writeText(issued.token)}>
                 Copy
               </Button>
               <Button onClick={onClose}>Done</Button>
@@ -983,18 +1086,10 @@ function ClaimBoardDialog({
     setLabel("");
     setFamily(FAMILIES[0].value);
     setGpio("");
-    // Pre-select when the shuttle has exactly one card - with a single
-    // candidate there is nothing to choose, and making the operator
-    // choose it anyway is how the field ends up skipped.
     setCapture(captureOptions.length === 1 ? (captureOptions[0].usb_serial ?? "") : "");
   }, [device?.device_id, captureOptions.length]);
 
-  // A probed chain is offered as the expected IDCODE so a later swap is
-  // noticed. Zynq parts report their ARM core alongside the fabric, so
-  // the last entry is the one worth pinning.
-  const suggestedIdcode = device?.jtag_chain?.length
-    ? device.jtag_chain[device.jtag_chain.length - 1].idcode
-    : null;
+  const suggestedIdcode = device?.jtag_chain?.length ? device.jtag_chain[device.jtag_chain.length - 1].idcode : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1026,21 +1121,14 @@ function ClaimBoardDialog({
           <form onSubmit={handleSubmit}>
             <h2 className="text-lg font-semibold">Register board</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Programmer <span className="font-mono text-xs">{device.usb_serial}</span> on{" "}
-              {device.shuttle_name}. Identity binds to this serial, so the board keeps its
-              registration when moved to another port or machine.
+              Programmer <span className="font-mono text-xs">{device.usb_serial}</span> on {device.shuttle_name}. Identity
+              binds to this serial, so the board keeps its registration when moved to another port or machine.
             </p>
 
             <div className="mt-4 space-y-3">
               <div>
                 <Label htmlFor="board-label">Label</Label>
-                <Input
-                  id="board-label"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder="EduPow 2.1 CIV #10"
-                  autoFocus
-                />
+                <Input id="board-label" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="EduPow 2.1 CIV #10" autoFocus />
               </div>
 
               <div>
@@ -1059,10 +1147,9 @@ function ClaimBoardDialog({
                 </select>
                 {suggestedIdcode ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Probed IDCODE{" "}
-                    <span className="font-mono">{suggestedIdcode}</span> will be recorded, so a
-                    later hardware swap is flagged. An IDCODE can be shared by several families —
-                    pick the one this board actually is.
+                    Probed IDCODE <span className="font-mono">{suggestedIdcode}</span> will be recorded, so a later
+                    hardware swap is flagged. An IDCODE can be shared by several families — pick the one this board
+                    actually is.
                   </p>
                 ) : (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1087,21 +1174,16 @@ function ClaimBoardDialog({
                   ))}
                 </select>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  A capture card watches one board's HDMI output, so it is recorded per board.
-                  Without this the lab's video cannot be checked.
+                  A capture card watches one board's HDMI output, so it is recorded per board. Without this the lab's
+                  video cannot be checked.
                 </p>
               </div>
 
               <div>
                 <Label htmlFor="board-gpio">GPIO controller (optional)</Label>
-                <Input
-                  id="board-gpio"
-                  value={gpio}
-                  onChange={(e) => setGpio(e.target.value)}
-                  placeholder="10.30.70.50:20000"
-                />
+                <Input id="board-gpio" value={gpio} onChange={(e) => setGpio(e.target.value)} placeholder="10.30.70.50:20000" />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  The Raspberry Pi driving this board's switches, if it has one.
+                  The Raspberry Pi driving this board's switches, if it has one. Discovery can find its address.
                 </p>
               </div>
             </div>
@@ -1190,12 +1272,7 @@ function DeploymentForm({
     <form onSubmit={handleSubmit} className="mt-5 grid gap-3 border-t pt-4 sm:grid-cols-4">
       <div>
         <Label htmlFor="dep-lab">Lab</Label>
-        <select
-          id="dep-lab"
-          value={labId}
-          onChange={(e) => setLabId(e.target.value)}
-          className={selectClass}
-        >
+        <select id="dep-lab" value={labId} onChange={(e) => setLabId(e.target.value)} className={selectClass}>
           <option value="">Select…</option>
           {available.map((l) => (
             <option key={l.id} value={l.id}>
@@ -1206,12 +1283,7 @@ function DeploymentForm({
       </div>
       <div>
         <Label htmlFor="dep-template">Template</Label>
-        <select
-          id="dep-template"
-          value={templateId}
-          onChange={(e) => setTemplateId(e.target.value)}
-          className={selectClass}
-        >
+        <select id="dep-template" value={templateId} onChange={(e) => setTemplateId(e.target.value)} className={selectClass}>
           <option value="">Select…</option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>
@@ -1222,12 +1294,7 @@ function DeploymentForm({
       </div>
       <div>
         <Label htmlFor="dep-board">Board</Label>
-        <select
-          id="dep-board"
-          value={boardId}
-          onChange={(e) => setBoardId(e.target.value)}
-          className={selectClass}
-        >
+        <select id="dep-board" value={boardId} onChange={(e) => setBoardId(e.target.value)} className={selectClass}>
           <option value="">Select…</option>
           {boards.map((b) => (
             <option key={b.id} value={b.id}>
@@ -1239,13 +1306,7 @@ function DeploymentForm({
       <div className="flex items-end gap-2">
         <div className="grow">
           <Label htmlFor="dep-port">Port</Label>
-          <Input
-            id="dep-port"
-            value={port}
-            onChange={(e) => setPort(e.target.value)}
-            placeholder="5001"
-            inputMode="numeric"
-          />
+          <Input id="dep-port" value={port} onChange={(e) => setPort(e.target.value)} placeholder="5001" inputMode="numeric" />
         </div>
         <Button type="submit" disabled={saving || !labId || !templateId || !boardId || !port}>
           Bind
@@ -1255,10 +1316,8 @@ function DeploymentForm({
   );
 }
 
-/** Human-readable summary of one stored requirement.
- *  Kept exhaustive with a `never` fallthrough: adding a requirement type
- *  to the union without teaching this function about it is then a
- *  compile error rather than a row that silently renders as blank. */
+/** Human-readable summary of one stored requirement. Exhaustive with a
+ *  `never` fallthrough. */
 function describeRequirement(req: LabRequirement): { label: string; detail: string } {
   switch (req.type) {
     case "fpga":
@@ -1266,10 +1325,7 @@ function describeRequirement(req: LabRequirement): { label: string; detail: stri
     case "programmer":
       return { label: "Programmer", detail: req.signature };
     case "video_capture":
-      return {
-        label: "HDMI capture",
-        detail: req.require_signal ? "live signal required" : "card present is enough",
-      };
+      return { label: "HDMI capture", detail: req.require_signal ? "live signal required" : "card present is enough" };
     case "gpio":
       return { label: "GPIO controller", detail: "assigned to the board" };
     default: {
@@ -1282,28 +1338,13 @@ function describeRequirement(req: LabRequirement): { label: string; detail: stri
 const REQUIREMENT_KINDS: { type: LabRequirement["type"]; label: string; blank: LabRequirement }[] = [
   { type: "fpga", label: "FPGA board", blank: { type: "fpga", family: FAMILIES[0].value } },
   { type: "programmer", label: "Programmer", blank: { type: "programmer", signature: "" } },
-  {
-    type: "video_capture",
-    label: "HDMI capture",
-    blank: { type: "video_capture", require_signal: true },
-  },
+  { type: "video_capture", label: "HDMI capture", blank: { type: "video_capture", require_signal: true } },
   { type: "gpio", label: "GPIO controller", blank: { type: "gpio" } },
 ];
 
-/** Builds a lab template: what a lab needs, stated once.
- *
- *  One requirement of each type at most. That is not an arbitrary
- *  restriction - the engine resolves the board in question from the
- *  first fpga requirement, and a second capture or GPIO entry would
- *  resolve to the same board's hardware, so repeats can only ever
- *  disagree with each other. */
-function TemplateForm({
-  signatures,
-  onDone,
-}: {
-  signatures: string[];
-  onDone: () => Promise<void>;
-}) {
+/** Builds a lab template: what a lab needs, stated once. One requirement
+ *  of each type at most. */
+function TemplateForm({ signatures, onDone }: { signatures: string[]; onDone: () => Promise<void> }) {
   const { showError, showSuccess } = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -1327,11 +1368,7 @@ function TemplateForm({
     if (!name.trim() || requirements.length === 0) return;
     setSaving(true);
     try {
-      await api.createTemplate({
-        name: name.trim(),
-        description: description.trim() || null,
-        requirements,
-      });
+      await api.createTemplate({ name: name.trim(), description: description.trim() || null, requirements });
       showSuccess(`Template "${name.trim()}" created`);
       setName("");
       setDescription("");
@@ -1344,8 +1381,7 @@ function TemplateForm({
     }
   }
 
-  const selectClass =
-    "h-8 rounded-md border border-input bg-transparent px-2 text-sm focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
+  const selectClass = "h-8 rounded-md border border-input bg-transparent px-2 text-sm focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
 
   return (
     <form onSubmit={handleSubmit} className="mt-5 border-t pt-4">
@@ -1354,21 +1390,11 @@ function TemplateForm({
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="tpl-name">Name</Label>
-          <Input
-            id="tpl-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Cyclone IV Vision Lab"
-          />
+          <Input id="tpl-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Cyclone IV Vision Lab" />
         </div>
         <div>
           <Label htmlFor="tpl-desc">Description (optional)</Label>
-          <Input
-            id="tpl-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Image processing with live HDMI capture"
-          />
+          <Input id="tpl-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Image processing with live HDMI capture" />
         </div>
       </div>
 
@@ -1376,25 +1402,17 @@ function TemplateForm({
         <Label>Requirements</Label>
         {requirements.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">
-            None yet. A template with no requirements would be trivially satisfied by every
-            shuttle, which says nothing — add at least one below.
+            None yet. A template with no requirements would be trivially satisfied by every shuttle, which says nothing —
+            add at least one below.
           </p>
         ) : (
           <ul className="mt-2 space-y-2">
             {requirements.map((req, index) => (
-              <li
-                key={`${req.type}-${index}`}
-                className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-3 py-2"
-              >
+              <li key={`${req.type}-${index}`} className="flex flex-wrap items-center gap-2 rounded-md border bg-card px-3 py-2">
                 <Badge variant="secondary">{describeRequirement(req).label}</Badge>
 
                 {req.type === "fpga" && (
-                  <select
-                    aria-label="FPGA family"
-                    className={selectClass}
-                    value={req.family}
-                    onChange={(e) => updateAt(index, { type: "fpga", family: e.target.value })}
-                  >
+                  <select aria-label="FPGA family" className={selectClass} value={req.family} onChange={(e) => updateAt(index, { type: "fpga", family: e.target.value })}>
                     {FAMILIES.map((f) => (
                       <option key={f.value} value={f.value}>
                         {f.label}
@@ -1405,19 +1423,13 @@ function TemplateForm({
 
                 {req.type === "programmer" && (
                   <>
-                    {/* A datalist, not a select: the suggestions are the
-                        signatures the fleet is currently reporting, but a
-                        template may legitimately name hardware that is not
-                        plugged in yet. */}
                     <input
                       aria-label="Programmer signature"
                       list="known-signatures"
                       className={`${selectClass} min-w-[14rem] font-mono text-xs`}
                       value={req.signature}
                       placeholder="altera-usb-blaster"
-                      onChange={(e) =>
-                        updateAt(index, { type: "programmer", signature: e.target.value })
-                      }
+                      onChange={(e) => updateAt(index, { type: "programmer", signature: e.target.value })}
                     />
                     <datalist id="known-signatures">
                       {signatures.map((s) => (
@@ -1432,31 +1444,16 @@ function TemplateForm({
                     aria-label="Signal requirement"
                     className={selectClass}
                     value={req.require_signal ? "yes" : "no"}
-                    onChange={(e) =>
-                      updateAt(index, {
-                        type: "video_capture",
-                        require_signal: e.target.value === "yes",
-                      })
-                    }
+                    onChange={(e) => updateAt(index, { type: "video_capture", require_signal: e.target.value === "yes" })}
                   >
                     <option value="yes">live signal required</option>
                     <option value="no">card present is enough</option>
                   </select>
                 )}
 
-                {req.type === "gpio" && (
-                  <span className="text-xs text-muted-foreground">
-                    the board must have a controller assigned
-                  </span>
-                )}
+                {req.type === "gpio" && <span className="text-xs text-muted-foreground">the board must have a controller assigned</span>}
 
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  className="ml-auto"
-                  onClick={() => removeAt(index)}
-                >
+                <Button type="button" size="sm" variant="secondary" className="ml-auto" onClick={() => removeAt(index)}>
                   Remove
                 </Button>
               </li>

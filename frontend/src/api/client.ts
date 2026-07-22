@@ -6,6 +6,7 @@ import {
   GapReport,
   LabRequirement,
   LabTemplate,
+  ScanResult,
   Shuttle,
   ShuttleEnrolled,
   UnclaimedDevice,
@@ -210,6 +211,9 @@ export const getGaps = () => get<GapReport[]>("/api/admin/fleet/gaps");
 export const getTemplateGaps = (id: number) =>
   get<GapReport[]>(`/api/admin/fleet/templates/${id}/gaps`);
 export const getUnusedDevices = () => get<Device[]>("/api/admin/fleet/unused");
+
+// A read-only TCP-connect sweep of the portal's own subnet, admin-only.
+export const scanNetwork = () => post<ScanResult>("/api/admin/fleet/scan");
 
 export const getDeployments = () => get<Deployment[]>("/api/admin/fleet/deployments");
 export const createDeployment = (data: {

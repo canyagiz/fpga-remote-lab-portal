@@ -647,3 +647,21 @@ class BoardUpdate(BaseModel):
     video_capture_serial: str | None = Field(default=None, max_length=128)
     gpio_endpoint: str | None = Field(default=None, max_length=128)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class DiscoveredHostOut(BaseModel):
+    ip: str
+    mac: str | None
+    vendor: str
+    # "raspberry_pi" | "proxmox" | "host"
+    kind: str
+    open_ports: list[int]
+    # Ties the host back to what we already know, so the list is not a
+    # wall of anonymous addresses.
+    note: str | None = None
+
+
+class ScanResultOut(BaseModel):
+    subnet: str
+    duration_ms: int
+    hosts: list[DiscoveredHostOut]
