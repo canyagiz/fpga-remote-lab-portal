@@ -41,9 +41,14 @@ export default function Navbar() {
               Calendar
             </Link>
             {user.role === "admin" && (
-              <Link to="/admin/users" className="font-medium text-muted-foreground hover:text-foreground">
-                Admin
-              </Link>
+              <>
+                <Link to="/admin/users" className="font-medium text-muted-foreground hover:text-foreground">
+                  Admin
+                </Link>
+                <Link to="/admin/fleet" className="font-medium text-muted-foreground hover:text-foreground">
+                  Fleet
+                </Link>
+              </>
             )}
             <Link
               to="/profile"

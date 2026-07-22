@@ -1,5 +1,13 @@
 import {
   AdminEntry,
+  Board,
+  Deployment,
+  Device,
+  GapReport,
+  LabTemplate,
+  Shuttle,
+  ShuttleEnrolled,
+  UnclaimedDevice,
   AdminUserDetail,
   AdminUserSummary,
   ApiError,
@@ -142,5 +150,63 @@ export const getAdmins = () => get<AdminEntry[]>("/api/admin/admins");
 export const grantAdmin = (email: string) => post<MessageResponse>("/api/admin/admins", { email });
 export const revokeAdmin = (email: string) =>
   del<MessageResponse>(`/api/admin/admins/${encodeURIComponent(email)}`);
+
+// --- fleet inventory (admin) ---
+
+export const getShuttles = () => get<Shuttle[]>("/api/admin/fleet/shuttles");
+// The response carries the agent token in plaintext - it is the only
+// time the server will ever produce it, so the caller must show it to
+// the admin rather than discard it.
+export const enrolShuttle = (name: string, role = "worker") =>
+  post<ShuttleEnrolled>("/api/admin/fleet/shuttles", { name, role });
+export const rotateShuttleToken = (id: number) =>
+  post<ShuttleEnrolled>(`/api/admin/fleet/shuttles/${id}/rotate-token`);
+export const setShuttleAddress = (id: number, address: string) =>
+  put<Shuttle>(`/api/admin/fleet/shuttles/${id}/address`, { address });
+export const deleteShuttle = (id: number) =>
+  del<MessageResponse>(`/api/admin/fleet/shuttles/${id}`);
+
+export const getFleetDevices = (includeAbsent = false) =>
+  get<Device[]>(`/api/admin/fleet/devices${includeAbsent ? "?include_absent=true" : ""}`);
+export const getUnclaimedDevices = () =>
+  get<UnclaimedDevice[]>("/api/admin/fleet/boards/unclaimed");
+
+export const getBoards = () => get<Board[]>("/api/admin/fleet/boards");
+export const registerBoard = (data: {
+  label: string;
+  family: string;
+  programmer_serial: string;
+  expected_idcode?: string | null;
+  video_capture_serial?: string | null;
+  gpio_endpoint?: string | null;
+  notes?: string | null;
+}) => post<Board>("/api/admin/fleet/boards", data);
+export const deleteBoard = (id: number) => del<MessageResponse>(`/api/admin/fleet/boards/${id}`);
+
+export const getTemplates = () => get<LabTemplate[]>("/api/admin/fleet/templates");
+export const createTemplate = (data: {
+  name: string;
+  description?: string | null;
+  requirements: Record<string, unknown>[];
+}) => post<LabTemplate>("/api/admin/fleet/templates", data);
+export const deleteTemplate = (id: number) =>
+  del<MessageResponse>(`/api/admin/fleet/templates/${id}`);
+
+export const getGaps = () => get<GapReport[]>("/api/admin/fleet/gaps");
+export const getTemplateGaps = (id: number) =>
+  get<GapReport[]>(`/api/admin/fleet/templates/${id}/gaps`);
+export const getUnusedDevices = () => get<Device[]>("/api/admin/fleet/unused");
+
+export const getDeployments = () => get<Deployment[]>("/api/admin/fleet/deployments");
+export const createDeployment = (data: {
+  lab_id: number;
+  template_id: number;
+  board_id: number;
+  port: number;
+}) => post<Deployment>("/api/admin/fleet/deployments", data);
+export const setDeploymentEnabled = (id: number, enabled: boolean) =>
+  post<Deployment>(`/api/admin/fleet/deployments/${id}/enable?enabled=${enabled}`);
+export const deleteDeployment = (id: number) =>
+  del<MessageResponse>(`/api/admin/fleet/deployments/${id}`);
 
 export { ApiError };
