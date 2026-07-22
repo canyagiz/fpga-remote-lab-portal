@@ -30,6 +30,19 @@ function familyLabel(value: string): string {
   return FAMILIES.find((f) => f.value === value)?.label ?? value;
 }
 
+/** Manufacturer plus product, without saying the brand twice.
+ *  Some devices already carry the vendor in their product string -
+ *  Digilent's programmer reports manufacturer "Digilent" and product
+ *  "Digilent Adept USB Device" - so joining them blindly reads as
+ *  "Digilent Digilent Adept USB Device". */
+function describeDevice(manufacturer: string | null, product: string | null): string {
+  const maker = manufacturer?.trim() ?? "";
+  const name = product?.trim() ?? "";
+  if (!maker) return name || "Unknown device";
+  if (!name) return maker;
+  return name.toLowerCase().startsWith(maker.toLowerCase()) ? name : `${maker} ${name}`;
+}
+
 function formatWhen(iso: string | null): string {
   if (!iso) return "never";
   const then = new Date(iso).getTime();
@@ -293,7 +306,7 @@ export default function FleetPage() {
                     <TableRow key={d.device_id}>
                       <TableCell className="font-mono text-xs">{d.usb_serial}</TableCell>
                       <TableCell>
-                        {d.manufacturer} {d.product}
+                        {describeDevice(d.manufacturer, d.product)}
                       </TableCell>
                       <TableCell className="text-muted-foreground">{d.shuttle_name}</TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
@@ -641,7 +654,7 @@ export default function FleetPage() {
                 <li key={d.id} className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-xs">{d.usb_serial ?? d.sysfs_path}</span>
                   <span className="text-muted-foreground">
-                    {d.manufacturer} {d.product}
+                    {describeDevice(d.manufacturer, d.product)}
                   </span>
                 </li>
               ))}
