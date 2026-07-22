@@ -176,7 +176,10 @@ export interface AdminEntry {
 export interface Shuttle {
   id: number;
   name: string;
+  // Self-reported by the agent - diagnostic only.
   hostname: string | null;
+  // Admin-set. The only field that decides where student traffic goes.
+  address: string | null;
   role: string;
   agent_version: string | null;
   last_report_at: string | null;

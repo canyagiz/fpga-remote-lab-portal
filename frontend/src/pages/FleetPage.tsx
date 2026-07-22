@@ -370,10 +370,20 @@ export default function FleetPage() {
                         <StatusBadge status={s.status} />
                       </TableCell>
                       <TableCell className="font-mono text-xs">
-                        {s.hostname ? (
-                          <span className="text-muted-foreground">{s.hostname}</span>
+                        {/* The admin-set address, not the agent's
+                            self-reported hostname - this column drives
+                            where students are sent, so it has to show
+                            the value that actually does that. Hostname
+                            sits underneath as a diagnostic. */}
+                        {s.address ? (
+                          s.address
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-warning-muted-foreground">not set</span>
+                        )}
+                        {s.hostname && (
+                          <span className="block text-[10px] text-muted-foreground">
+                            {s.hostname}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>{s.device_count}</TableCell>
@@ -492,6 +502,84 @@ export default function FleetPage() {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Everything the agents can see, board or not. Without this the
+          capture cards and any other supporting hardware are recorded but
+          invisible - they are not boards, so the Boards table has no row
+          for them, and they are not programmers, so the claim queue never
+          lists them. */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Attached hardware</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Serial</TableHead>
+                  <TableHead>Device</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Port</TableHead>
+                  <TableHead>Used by</TableHead>
+                  <TableHead>Health</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {devices.length === 0 ? (
+                  <EmptyRow colSpan={6}>
+                    Nothing reported yet. An enrolled shuttle only appears here once its
+                    agent is installed and running.
+                  </EmptyRow>
+                ) : (
+                  devices.map((d) => {
+                    const board = boards.find(
+                      (b) =>
+                        b.programmer_serial === d.usb_serial ||
+                        b.video_capture_serial === d.usb_serial,
+                    );
+                    return (
+                      <TableRow key={d.id}>
+                        <TableCell className="font-mono text-xs">
+                          {d.usb_serial ?? <span className="text-muted-foreground">none</span>}
+                        </TableCell>
+                        <TableCell>{describeDevice(d.manufacturer, d.product)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{d.kind.replace("_", " ")}</Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {d.sysfs_path}
+                        </TableCell>
+                        <TableCell>
+                          {board ? (
+                            board.label
+                          ) : (
+                            <span className="text-muted-foreground">not claimed</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {/* Only capture cards report a signal. For anything
+                              else this is genuinely not applicable, which is
+                              different from unknown. */}
+                          {d.kind !== "video_capture" ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : d.has_video_signal === true ? (
+                            <Badge variant="success">signal</Badge>
+                          ) : d.has_video_signal === false ? (
+                            <Badge variant="destructive">no signal</Badge>
+                          ) : (
+                            <Badge variant="outline">unknown</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 

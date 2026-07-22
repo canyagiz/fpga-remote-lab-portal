@@ -75,6 +75,7 @@ def _shuttle_out(db: Session, shuttle: Shuttle) -> ShuttleOut:
         id=shuttle.id,
         name=shuttle.name,
         hostname=shuttle.hostname,
+        address=shuttle.address,
         role=shuttle.role.value,
         agent_version=shuttle.agent_version,
         last_report_at=shuttle.last_report_at,

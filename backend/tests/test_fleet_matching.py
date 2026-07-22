@@ -344,6 +344,19 @@ def test_hardware_no_template_wants_is_reported_as_spare(client):
     assert {d["usb_serial"] for d in spare} == {"003017A6FDC3"}
 
 
+def test_nothing_is_spare_before_any_template_exists(client):
+    """With nothing declaring a need, every device would trivially count
+    as unused - and a list of all the hardware under "no lab template
+    asks for it" reads as a fault when the real state is just that no
+    templates have been written yet."""
+    _admin(client)
+    _, token = _enrol(client)
+    _post(client, token, _report([BLASTER, FTDI, MAGEWELL], _signal("D206240701386", True)))
+    _register_board(client)
+
+    assert client.get("/api/admin/fleet/unused").json() == []
+
+
 def test_admin_only(client):
     register(client, "alice", "alice@example.com")
     login(client, "alice")

@@ -141,6 +141,14 @@ def unused_devices(db: Session) -> list[Device]:
     another one.
     """
     templates = db.scalars(select(LabTemplate)).all()
+    if not templates:
+        # With nothing declaring a need, "unused" has no meaning - every
+        # device would trivially qualify, and a list of all the hardware
+        # under the heading "no lab template asks for it" reads as a
+        # fault when the real state is simply that no templates exist
+        # yet. Answer nothing rather than answer misleadingly.
+        return []
+
     wanted_families: set[FpgaFamily] = set()
     wanted_signatures: set[str] = set()
     wants_capture = False

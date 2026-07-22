@@ -483,7 +483,11 @@ class ShuttleOut(BaseModel):
 
     id: int
     name: str
+    # Self-reported by the agent - diagnostic only, never trusted.
     hostname: str | None
+    # Admin-set, and the only field allowed to influence where student
+    # traffic is sent. Surfaced so an admin can actually verify it.
+    address: str | None
     role: str
     agent_version: str | None
     last_report_at: datetime | None
