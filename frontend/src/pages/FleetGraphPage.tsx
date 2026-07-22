@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import * as api from "../api/client";
@@ -6,16 +6,17 @@ import { Board, Deployment, Device, GapReport, Shuttle } from "../api/types";
 import { useToast } from "../context/ToastContext";
 
 /* ------------------------------------------------------------------ *
- *  A node-edge graph of the fleet, drawn by hand in SVG.
+ *  Fleet topology as a real node-edge graph.
  *
- *  No graph library on purpose - the same reason the backend takes one
- *  REST call over a whole SDK. A force layout would also fight the
- *  point of this screen, which is that the operator arranges it: nodes
- *  are draggable and stay where they are put, like a blueprint canvas.
+ *  HTML nodes over an SVG edge layer - the same technique the graph
+ *  libraries use, which is the actual reason they look good, done here
+ *  with no dependency (React Flow alone pulls 85 packages). Nodes are
+ *  real DOM, so they get proper type, padding and truncation; edges are
+ *  SVG underneath. Both share one pan/zoom transform.
  *
- *  Two levels, entered by clicking a shuttle:
- *    fleet    - the portal (master) and every shuttle reporting to it
- *    shuttle  - one shuttle, its boards, and each board's devices
+ *  Two levels, entered by clicking a shuttle. The shuttle level is a
+ *  mesh, not a tree: a USB device is wired to the shuttle it plugs into
+ *  AND to the board it serves, so it carries both edges.
  * ------------------------------------------------------------------ */
 
 const FAMILY_LABELS: Record<string, string> = {
@@ -43,7 +44,7 @@ function formatWhen(iso: string | null): string {
 }
 
 type NodeState = "ok" | "warn" | "bad" | "neutral";
-type NodeKind = "portal" | "shuttle" | "board" | "programmer" | "capture" | "gpio" | "loose";
+type NodeKind = "portal" | "shuttle" | "board" | "device" | "gpio" | "loose";
 
 interface InfoRow {
   k: string;
@@ -52,8 +53,10 @@ interface InfoRow {
 interface GNode {
   id: string;
   kind: NodeKind;
-  label: string;
-  sub?: string;
+  title: string;
+  sub: string;
+  chip?: string;
+  badge?: { text: string; state: NodeState };
   state: NodeState;
   x: number;
   y: number;
@@ -64,14 +67,25 @@ interface GEdge {
   id: string;
   from: string;
   to: string;
-  role: string;
+  label: string;
   dashed?: boolean;
   state: NodeState;
   info: { title: string; rows: InfoRow[] };
 }
+interface Built {
+  nodes: GNode[];
+  edges: GEdge[];
+}
 
-/** Colour for a node/edge's state. Semantic, not the accent - a board
- *  being ready is a different axis from the page's own primary colour. */
+const SIZES: Record<NodeKind, { w: number; h: number; round?: boolean }> = {
+  portal: { w: 96, h: 96, round: true },
+  shuttle: { w: 108, h: 108, round: true },
+  board: { w: 200, h: 66 },
+  device: { w: 190, h: 60 },
+  gpio: { w: 190, h: 60 },
+  loose: { w: 190, h: 60 },
+};
+
 function stateColor(state: NodeState): string {
   switch (state) {
     case "ok":
@@ -85,62 +99,48 @@ function stateColor(state: NodeState): string {
   }
 }
 
-/** Evenly space `count` points on a circle - the default layout before
- *  anyone drags anything. */
 function ring(cx: number, cy: number, count: number, radius: number, start = -Math.PI / 2) {
   if (count === 0) return [];
   return Array.from({ length: count }, (_, i) => {
     const a = start + (i * 2 * Math.PI) / count;
-    return { x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a) };
+    return { x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a), angle: a };
   });
 }
 
 type View = { mode: "fleet" } | { mode: "shuttle"; shuttleId: number };
 
-interface Built {
-  nodes: GNode[];
-  edges: GEdge[];
-}
-
-function buildFleet(
-  shuttles: Shuttle[],
-  boards: Board[],
-  devices: Device[],
-): Built {
+function buildFleet(shuttles: Shuttle[], boards: Board[], devices: Device[]): Built {
   const nodes: GNode[] = [];
   const edges: GEdge[] = [];
 
   nodes.push({
     id: "portal",
     kind: "portal",
-    label: "Portal",
-    sub: "master",
+    title: "Portal",
+    sub: "master · CT210",
     state: "neutral",
     x: 0,
     y: 0,
     info: {
       title: "Portal (master)",
       rows: [
-        { k: "role", v: "control plane - CT210" },
+        { k: "role", v: "control plane" },
         { k: "shuttles", v: String(shuttles.length) },
       ],
     },
   });
 
-  const positions = ring(0, 0, shuttles.length, Math.max(240, shuttles.length * 70));
+  const pos = ring(0, 0, shuttles.length, Math.max(260, shuttles.length * 90));
   shuttles.forEach((s, i) => {
-    const boardCount = boards.filter((b) => b.shuttle_id === s.id).length;
-    const deviceCount = devices.filter((d) => d.shuttle_id === s.id).length;
-    const state: NodeState =
-      s.status === "online" ? "ok" : s.status === "offline" ? "bad" : "neutral";
+    const state: NodeState = s.status === "online" ? "ok" : s.status === "offline" ? "bad" : "neutral";
     nodes.push({
       id: `shuttle-${s.id}`,
       kind: "shuttle",
-      label: s.name,
-      sub: s.address ?? "no address",
+      title: s.name,
+      sub: "open →",
       state,
-      x: positions[i].x,
-      y: positions[i].y,
+      x: pos[i].x,
+      y: pos[i].y,
       drillShuttleId: s.id,
       info: {
         title: s.name,
@@ -149,30 +149,29 @@ function buildFleet(
           { k: "address", v: s.address ?? "not set" },
           { k: "agent", v: s.agent_version ?? "—" },
           { k: "last report", v: formatWhen(s.last_report_at) },
-          { k: "boards", v: String(boardCount) },
-          { k: "devices", v: String(deviceCount) },
+          { k: "boards", v: String(boards.filter((b) => b.shuttle_id === s.id).length) },
+          { k: "devices", v: String(devices.filter((d) => d.shuttle_id === s.id).length) },
         ],
       },
     });
     edges.push({
       id: `report-${s.id}`,
-      from: "portal",
-      to: `shuttle-${s.id}`,
-      role: "reports",
+      from: `shuttle-${s.id}`,
+      to: "portal",
+      label: "reports",
       dashed: s.status !== "online",
       state,
       info: {
         title: `${s.name} → Portal`,
         rows: [
-          { k: "link", v: "inventory reporting, every 30s" },
+          { k: "link", v: "inventory reporting" },
+          { k: "interval", v: "every 30s" },
           { k: "status", v: s.status },
           { k: "last report", v: formatWhen(s.last_report_at) },
-          { k: "agent", v: s.agent_version ?? "—" },
         ],
       },
     });
   });
-
   return { nodes, edges };
 }
 
@@ -194,10 +193,11 @@ function buildShuttle(
   const bySerial = (serial: string | null) =>
     serial ? myDevices.find((d) => d.usb_serial === serial) : undefined;
 
+  const shuttleNodeId = `shuttle-${shuttleId}`;
   nodes.push({
-    id: `shuttle-${shuttleId}`,
+    id: shuttleNodeId,
     kind: "shuttle",
-    label: shuttle.name,
+    title: shuttle.name,
     sub: shuttle.address ?? "no address",
     state: shuttle.status === "online" ? "ok" : shuttle.status === "offline" ? "bad" : "neutral",
     x: 0,
@@ -212,8 +212,12 @@ function buildShuttle(
     },
   });
 
-  const boardPos = ring(0, 0, myBoards.length, 260);
+  const R_BOARD = 340;
+  const R_DEV = 185;
+  const boardPos = ring(0, 0, myBoards.length, R_BOARD);
+
   myBoards.forEach((board, bi) => {
+    const theta = boardPos[bi].angle;
     const gap = gaps.find(
       (g) =>
         g.shuttle_id === shuttleId &&
@@ -225,8 +229,9 @@ function buildShuttle(
     nodes.push({
       id: bid,
       kind: "board",
-      label: board.label,
-      sub: FAMILY_LABELS[board.family] ?? board.family,
+      title: board.label,
+      sub: deployment ? `serving ${deployment.lab_name}` : "not bound to a lab",
+      chip: FAMILY_LABELS[board.family] ?? board.family,
       state,
       x: boardPos[bi].x,
       y: boardPos[bi].y,
@@ -234,72 +239,75 @@ function buildShuttle(
         title: board.label,
         rows: [
           { k: "family", v: FAMILY_LABELS[board.family] ?? board.family },
-          { k: "readiness", v: gap ? (gap.deployable ? "ready" : `${gap.missing_count} unmet`) : "no template" },
+          {
+            k: "readiness",
+            v: gap ? (gap.deployable ? "ready" : `${gap.missing_count} unmet`) : "no template",
+          },
           { k: "lab", v: deployment ? deployment.lab_name : "not bound" },
           { k: "serving", v: deployment ? (deployment.available ? "yes" : "withdrawn") : "—" },
         ],
       },
     });
-    edges.push({
-      id: `holds-${board.id}`,
-      from: `shuttle-${shuttleId}`,
-      to: bid,
-      role: "holds",
-      state,
-      info: {
-        title: `${shuttle.name} holds ${board.label}`,
-        rows: [
-          { k: "family", v: FAMILY_LABELS[board.family] ?? board.family },
-          { k: "readiness", v: gap ? (gap.deployable ? "ready" : `${gap.missing_count} unmet`) : "no template" },
-        ],
-      },
-    });
 
-    // The board's own hardware, placed on a small arc facing outward so
-    // it does not collide with the neighbouring boards' devices.
-    const outward = Math.atan2(boardPos[bi].y, boardPos[bi].x);
-    const children: { id: string; node: GNode; edge: GEdge }[] = [];
+    type Spec = {
+      id: string;
+      node: GNode;
+      toShuttle: { label: string; dashed: boolean; state: NodeState; info: GEdge["info"] };
+      toBoard: { label: string; dashed: boolean; state: NodeState; info: GEdge["info"] };
+    };
+    const specs: Spec[] = [];
 
     const prog = bySerial(board.programmer_serial);
-    children.push({
+    const isXilinx = board.family === "zynq_7020";
+    specs.push({
       id: `prog-${board.id}`,
       node: {
         id: `prog-${board.id}`,
-        kind: "programmer",
-        label: prog ? describeDevice(prog.manufacturer, prog.product) : board.programmer_serial,
+        kind: "device",
+        title: prog ? describeDevice(prog.manufacturer, prog.product) : "Programmer",
         sub: board.programmer_serial,
+        chip: "programmer",
         state: prog ? "ok" : "bad",
         x: 0,
         y: 0,
         info: {
-          title: prog ? describeDevice(prog.manufacturer, prog.product) : "Programmer (not reported)",
+          title: prog ? describeDevice(prog.manufacturer, prog.product) : "Programmer (not attached)",
           rows: prog
             ? [
-                { k: "role", v: "programmer" },
+                { k: "role", v: "JTAG programmer" },
                 { k: "serial", v: prog.usb_serial ?? "—" },
-                { k: "port", v: prog.sysfs_path },
+                { k: "USB port", v: prog.sysfs_path },
                 {
-                  k: "jtag",
+                  k: "JTAG chain",
                   v: prog.jtag_chain?.length
                     ? prog.jtag_chain.map((c) => c.idcode).join(" · ")
                     : "not probed",
                 },
               ]
-            : [{ k: "serial", v: board.programmer_serial }, { k: "state", v: "not attached" }],
+            : [{ k: "serial", v: board.programmer_serial }, { k: "state", v: "not reported" }],
         },
       },
-      edge: {
-        id: `e-prog-${board.id}`,
-        from: bid,
-        to: `prog-${board.id}`,
-        role: "programmer",
+      toShuttle: {
+        label: prog ? `USB ${prog.sysfs_path}` : "USB",
+        dashed: !prog,
+        state: "neutral",
+        info: {
+          title: "USB connection",
+          rows: [
+            { k: "into", v: shuttle.name },
+            { k: "port", v: prog?.sysfs_path ?? "—" },
+          ],
+        },
+      },
+      toBoard: {
+        label: "JTAG",
         dashed: !prog,
         state: prog ? "neutral" : "bad",
         info: {
-          title: "Programmer link",
+          title: "JTAG programming link",
           rows: [
-            { k: "serial", v: board.programmer_serial },
-            { k: "port", v: prog?.sysfs_path ?? "—" },
+            { k: "programs", v: board.label },
+            { k: "tool", v: isXilinx ? "openFPGALoader" : "quartus_pgm" },
           ],
         },
       },
@@ -308,13 +316,22 @@ function buildShuttle(
     if (board.video_capture_serial) {
       const cap = bySerial(board.video_capture_serial);
       const sig = cap?.has_video_signal;
-      children.push({
+      specs.push({
         id: `cap-${board.id}`,
         node: {
           id: `cap-${board.id}`,
-          kind: "capture",
-          label: cap ? describeDevice(cap.manufacturer, cap.product) : board.video_capture_serial,
-          sub: sig === true ? "signal" : sig === false ? "no signal" : cap ? "signal unknown" : "not attached",
+          kind: "device",
+          title: cap ? describeDevice(cap.manufacturer, cap.product) : "Capture card",
+          sub: board.video_capture_serial,
+          chip: "capture",
+          badge:
+            sig === true
+              ? { text: "signal", state: "ok" }
+              : sig === false
+                ? { text: "no signal", state: "bad" }
+                : cap
+                  ? { text: "signal unknown", state: "warn" }
+                  : { text: "not attached", state: "bad" },
           state: !cap ? "bad" : sig === false ? "bad" : sig === true ? "ok" : "warn",
           x: 0,
           y: 0,
@@ -323,24 +340,30 @@ function buildShuttle(
             rows: [
               { k: "role", v: "HDMI capture" },
               { k: "serial", v: board.video_capture_serial },
-              {
-                k: "signal",
-                v: sig === true ? "present" : sig === false ? "none" : "unknown",
-              },
+              { k: "signal", v: sig === true ? "present" : sig === false ? "none" : "unknown" },
             ],
           },
         },
-        edge: {
-          id: `e-cap-${board.id}`,
-          from: bid,
-          to: `cap-${board.id}`,
-          role: "captures",
+        toShuttle: {
+          label: cap ? `USB ${cap.sysfs_path}` : "USB",
+          dashed: !cap,
+          state: "neutral",
+          info: {
+            title: "USB connection",
+            rows: [
+              { k: "into", v: shuttle.name },
+              { k: "port", v: cap?.sysfs_path ?? "—" },
+            ],
+          },
+        },
+        toBoard: {
+          label: "HDMI",
           dashed: !cap,
           state: sig === false ? "bad" : "neutral",
           info: {
-            title: "Capture link",
+            title: "HDMI capture link",
             rows: [
-              { k: "watches", v: board.label },
+              { k: "captures", v: board.label },
               { k: "signal", v: sig === true ? "present" : sig === false ? "none" : "unknown" },
             ],
           },
@@ -349,13 +372,14 @@ function buildShuttle(
     }
 
     if (board.gpio_endpoint) {
-      children.push({
+      specs.push({
         id: `gpio-${board.id}`,
         node: {
           id: `gpio-${board.id}`,
           kind: "gpio",
-          label: "GPIO controller",
+          title: "GPIO controller",
           sub: board.gpio_endpoint,
+          chip: "network",
           state: "neutral",
           x: 0,
           y: 0,
@@ -363,59 +387,83 @@ function buildShuttle(
             title: "GPIO controller",
             rows: [
               { k: "endpoint", v: board.gpio_endpoint },
+              { k: "drives", v: `${board.label} switches` },
               { k: "reached", v: "over the network, not USB" },
-              { k: "verified", v: "no - assignment only, not probed" },
+              { k: "verified", v: "no — assignment only" },
             ],
           },
         },
-        edge: {
-          id: `e-gpio-${board.id}`,
-          from: bid,
-          to: `gpio-${board.id}`,
-          role: "drives",
+        toShuttle: {
+          label: "network",
           dashed: true,
           state: "neutral",
           info: {
-            title: "GPIO link (network)",
+            title: "Network reach",
             rows: [
+              { k: "from", v: shuttle.name },
               { k: "endpoint", v: board.gpio_endpoint },
-              { k: "note", v: "recorded by a person, not discovered" },
+              { k: "note", v: "not discovered — recorded by a person" },
+            ],
+          },
+        },
+        toBoard: {
+          label: "switches",
+          dashed: true,
+          state: "neutral",
+          info: {
+            title: "Drives the board's switches",
+            rows: [
+              { k: "board", v: board.label },
+              { k: "endpoint", v: board.gpio_endpoint },
             ],
           },
         },
       });
     }
 
-    const childPos = ring(
-      boardPos[bi].x,
-      boardPos[bi].y,
-      children.length,
-      130,
-      outward - (Math.PI / 4) * (children.length - 1) * 0.5,
-    );
-    children.forEach((c, ci) => {
-      c.node.x = childPos[ci].x;
-      c.node.y = childPos[ci].y;
-      nodes.push(c.node);
-      edges.push(c.edge);
+    const spread = Math.min(0.9, 0.34 * specs.length);
+    specs.forEach((spec, i) => {
+      const frac = specs.length === 1 ? 0 : i / (specs.length - 1) - 0.5;
+      const a = theta + frac * spread;
+      spec.node.x = R_DEV * Math.cos(a);
+      spec.node.y = R_DEV * Math.sin(a);
+      nodes.push(spec.node);
+      edges.push({
+        id: `e-${spec.id}-shuttle`,
+        from: spec.id,
+        to: shuttleNodeId,
+        label: spec.toShuttle.label,
+        dashed: spec.toShuttle.dashed,
+        state: spec.toShuttle.state,
+        info: spec.toShuttle.info,
+      });
+      edges.push({
+        id: `e-${spec.id}-board`,
+        from: spec.id,
+        to: bid,
+        label: spec.toBoard.label,
+        dashed: spec.toBoard.dashed,
+        state: spec.toBoard.state,
+        info: spec.toBoard.info,
+      });
     });
   });
 
-  // Attached but claimed by no board.
   const claimed = new Set<string>();
   myBoards.forEach((b) => {
     claimed.add(b.programmer_serial);
     if (b.video_capture_serial) claimed.add(b.video_capture_serial);
   });
   const loose = myDevices.filter((d) => !d.usb_serial || !claimed.has(d.usb_serial));
-  const loosePos = ring(0, 0, loose.length, 150, Math.PI / 2);
+  const loosePos = ring(0, 0, loose.length, R_DEV, Math.PI / 2);
   loose.forEach((d, i) => {
     const id = `loose-${d.id}`;
     nodes.push({
       id,
       kind: "loose",
-      label: describeDevice(d.manufacturer, d.product),
+      title: describeDevice(d.manufacturer, d.product),
       sub: d.usb_serial ?? d.sysfs_path,
+      chip: d.kind.replace("_", " "),
       state: "warn",
       x: loosePos[i].x,
       y: loosePos[i].y,
@@ -430,41 +478,31 @@ function buildShuttle(
     });
     edges.push({
       id: `e-loose-${d.id}`,
-      from: `shuttle-${shuttleId}`,
-      to: id,
-      role: "unclaimed",
+      from: id,
+      to: shuttleNodeId,
+      label: `USB ${d.sysfs_path}`,
       dashed: true,
       state: "warn",
-      info: {
-        title: "Unclaimed device",
-        rows: [{ k: "serial", v: d.usb_serial ?? "none" }],
-      },
+      info: { title: "Unclaimed device", rows: [{ k: "serial", v: d.usb_serial ?? "none" }] },
     });
   });
 
   return { nodes, edges };
 }
 
-const NODE_W = 168;
-const NODE_H = 46;
-const SHUTTLE_R = 42;
-const PORTAL_R = 34;
-
-/** Where an edge should meet a node - the border, not the centre, so
- *  the line stops cleanly at the shape. */
-function anchor(node: GNode, towardX: number, towardY: number) {
-  const dx = towardX - node.x;
-  const dy = towardY - node.y;
+function anchor(node: GNode, x: number, y: number, towardX: number, towardY: number) {
+  const dx = towardX - x;
+  const dy = towardY - y;
   const len = Math.hypot(dx, dy) || 1;
-  if (node.kind === "shuttle" || node.kind === "portal") {
-    const r = node.kind === "shuttle" ? SHUTTLE_R : PORTAL_R;
-    return { x: node.x + (dx / len) * r, y: node.y + (dy / len) * r };
+  const size = SIZES[node.kind];
+  if (size.round) {
+    const r = size.w / 2;
+    return { x: x + (dx / len) * r, y: y + (dy / len) * r };
   }
-  // Rectangle: clip the ray to the box.
-  const hw = NODE_W / 2;
-  const hh = NODE_H / 2;
+  const hw = size.w / 2 + 2;
+  const hh = size.h / 2 + 2;
   const scale = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
-  return { x: node.x + dx * scale, y: node.y + dy * scale };
+  return { x: x + dx * scale, y: y + dy * scale };
 }
 
 export default function FleetGraphPage() {
@@ -477,15 +515,14 @@ export default function FleetGraphPage() {
 
   const [view, setView] = useState<View>({ mode: "fleet" });
   const [selected, setSelected] = useState<{ kind: "node" | "edge"; id: string } | null>(null);
-
-  // User-dragged positions override the default layout and survive both
-  // the 30s refresh and switching views - the point of a hand-arranged
-  // canvas is that it stays arranged.
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, { x: number; y: number }>>({});
+  const [isFull, setIsFull] = useState(false);
 
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [size, setSize] = useState({ w: 800, h: 560 });
-  const [pan, setPan] = useState({ x: 400, y: 280 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ w: 900, h: 560 });
+  const [pan, setPan] = useState({ x: 450, y: 280 });
   const [zoom, setZoom] = useState(1);
 
   async function refresh() {
@@ -514,7 +551,7 @@ export default function FleetGraphPage() {
   }, []);
 
   useLayoutEffect(() => {
-    const el = svgRef.current;
+    const el = canvasRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
       const r = el.getBoundingClientRect();
@@ -524,31 +561,60 @@ export default function FleetGraphPage() {
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    const h = () => setIsFull(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", h);
+    return () => document.removeEventListener("fullscreenchange", h);
+  }, []);
+
   const built = useMemo<Built>(() => {
     if (view.mode === "fleet") return buildFleet(shuttles, boards, devices);
     return buildShuttle(view.shuttleId, shuttles, boards, devices, deployments, gaps);
   }, [view, shuttles, boards, devices, deployments, gaps]);
 
-  // Re-frame when the view changes: centre origin, reset zoom, drop the
-  // selection so a stale panel from the other level does not linger.
-  const viewKey = view.mode === "fleet" ? "fleet" : `shuttle-${view.shuttleId}`;
-  useEffect(() => {
-    setPan({ x: size.w / 2, y: size.h / 2 });
-    setZoom(1);
-    setSelected(null);
-  }, [viewKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pos = (n: GNode) => overrides[n.id] ?? { x: n.x, y: n.y };
-  const nodeById = useMemo(() => {
-    const m: Record<string, GNode> = {};
-    built.nodes.forEach((n) => (m[n.id] = { ...n, ...(overrides[n.id] ?? {}) }));
+  const nodePos = useMemo(() => {
+    const m: Record<string, { x: number; y: number }> = {};
+    built.nodes.forEach((n) => (m[n.id] = overrides[n.id] ?? { x: n.x, y: n.y }));
     return m;
   }, [built, overrides]);
 
-  // --- pointer interaction: node drag, canvas pan, click-to-select ---
-  // Pointer capture on the svg means pointerup is redirected here rather
-  // than to the node the drag began on, so click-vs-drag is decided in
-  // the svg's own onPointerUp using what onPointerDown recorded.
+  const fitView = useCallback(() => {
+    if (built.nodes.length === 0 || size.w < 10) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    built.nodes.forEach((n) => {
+      const p = overrides[n.id] ?? { x: n.x, y: n.y };
+      const s = SIZES[n.kind];
+      minX = Math.min(minX, p.x - s.w / 2);
+      minY = Math.min(minY, p.y - s.h / 2);
+      maxX = Math.max(maxX, p.x + s.w / 2);
+      maxY = Math.max(maxY, p.y + s.h / 2);
+    });
+    const pad = 56;
+    const bw = Math.max(maxX - minX, 1);
+    const bh = Math.max(maxY - minY, 1);
+    const z = Math.min(1.4, Math.max(0.35, Math.min((size.w - 2 * pad) / bw, (size.h - 2 * pad) / bh)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    setZoom(z);
+    setPan({ x: size.w / 2 - cx * z, y: size.h / 2 - cy * z });
+  }, [built.nodes, overrides, size]);
+
+  const structureKey =
+    (view.mode === "fleet" ? "fleet" : `s${view.shuttleId}`) +
+    "|" +
+    built.nodes.map((n) => n.id).join(",");
+  const fittedRef = useRef("");
+  useEffect(() => {
+    const key = `${structureKey}@${Math.round(size.w)}x${Math.round(size.h)}`;
+    if (fittedRef.current === key || built.nodes.length === 0 || size.w < 10) return;
+    fittedRef.current = key;
+    setSelected(null);
+    fitView();
+  }, [structureKey, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const drag = useRef<
     | { kind: "node"; id: string; offX: number; offY: number; moved: boolean }
     | { kind: "pan"; startX: number; startY: number; panX: number; panY: number; moved: boolean }
@@ -556,29 +622,36 @@ export default function FleetGraphPage() {
   >(null);
 
   function toWorld(clientX: number, clientY: number) {
-    const r = svgRef.current!.getBoundingClientRect();
+    const r = canvasRef.current!.getBoundingClientRect();
     return { x: (clientX - r.left - pan.x) / zoom, y: (clientY - r.top - pan.y) / zoom };
   }
 
   function onNodePointerDown(e: React.PointerEvent, n: GNode) {
     e.stopPropagation();
-    svgRef.current?.setPointerCapture(e.pointerId);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const w = toWorld(e.clientX, e.clientY);
-    const p = pos(n);
+    const p = nodePos[n.id];
     drag.current = { kind: "node", id: n.id, offX: w.x - p.x, offY: w.y - p.y, moved: false };
   }
 
-  function onBackgroundPointerDown(e: React.PointerEvent) {
-    svgRef.current?.setPointerCapture(e.pointerId);
-    drag.current = { kind: "pan", startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y, moved: false };
+  function onCanvasPointerDown(e: React.PointerEvent) {
+    canvasRef.current?.setPointerCapture(e.pointerId);
+    drag.current = {
+      kind: "pan",
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
+      moved: false,
+    };
   }
 
   function onPointerMove(e: React.PointerEvent) {
     const d = drag.current;
     if (!d) return;
     if (d.kind === "node") {
-      const w = toWorld(e.clientX, e.clientY);
       d.moved = true;
+      const w = toWorld(e.clientX, e.clientY);
       setOverrides((o) => ({ ...o, [d.id]: { x: w.x - d.offX, y: w.y - d.offY } }));
     } else {
       const dx = e.clientX - d.startX;
@@ -588,17 +661,10 @@ export default function FleetGraphPage() {
     }
   }
 
-  function onPointerUp() {
+  function onNodePointerUp(n: GNode) {
     const d = drag.current;
     drag.current = null;
-    if (!d) return;
-    if (d.kind === "pan") {
-      if (!d.moved) setSelected(null); // a click on empty canvas clears
-      return;
-    }
-    if (d.moved) return; // a real drag, not a click
-    const n = built.nodes.find((node) => node.id === d.id);
-    if (!n) return;
+    if (!d || d.kind !== "node" || d.moved) return;
     if (view.mode === "fleet" && n.drillShuttleId != null) {
       setView({ mode: "shuttle", shuttleId: n.drillShuttleId });
     } else {
@@ -606,16 +672,26 @@ export default function FleetGraphPage() {
     }
   }
 
+  function onCanvasPointerUp() {
+    const d = drag.current;
+    drag.current = null;
+    if (d?.kind === "pan" && !d.moved) setSelected(null);
+  }
+
   function onWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    const r = svgRef.current!.getBoundingClientRect();
+    const r = canvasRef.current!.getBoundingClientRect();
     const cx = e.clientX - r.left;
     const cy = e.clientY - r.top;
-    const worldX = (cx - pan.x) / zoom;
-    const worldY = (cy - pan.y) / zoom;
-    const next = Math.min(2.2, Math.max(0.4, zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-    setPan({ x: cx - worldX * next, y: cy - worldY * next });
+    const wx = (cx - pan.x) / zoom;
+    const wy = (cy - pan.y) / zoom;
+    const next = Math.min(2.2, Math.max(0.35, zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    setPan({ x: cx - wx * next, y: cy - wy * next });
     setZoom(next);
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
+    else document.exitFullscreen();
   }
 
   const selectedShuttle =
@@ -625,6 +701,8 @@ export default function FleetGraphPage() {
       ? built.nodes.find((n) => n.id === selected.id)?.info
       : built.edges.find((e) => e.id === selected.id)?.info
     : undefined;
+
+  const transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -647,201 +725,215 @@ export default function FleetGraphPage() {
           <h1 className="mt-0.5 text-2xl font-bold tracking-tight">Fleet topology</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {view.mode === "fleet"
-              ? "Click a shuttle to open it. Drag nodes to arrange, drag the canvas to pan, scroll to zoom."
-              : "Boards and the hardware wired to each. Click an edge for its details."}
+              ? "Click a shuttle to open it. Drag nodes, drag the canvas to pan, scroll to zoom."
+              : "Each device is wired to the shuttle it plugs into and the board it serves. Hover an edge for what it is; click it for details."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <Link to="/admin/fleet" className="text-sm font-medium text-muted-foreground hover:text-foreground">
+          Table view →
+        </Link>
+      </div>
+
+      <div ref={containerRef} className="relative mt-5 overflow-hidden rounded-xl border bg-background">
+        <div className="absolute left-3 top-3 z-20 flex items-center gap-1.5">
           {view.mode === "shuttle" && (
             <Button size="sm" variant="secondary" onClick={() => setView({ mode: "fleet" })}>
               ← Fleet
             </Button>
           )}
+          <Button size="sm" variant="secondary" onClick={fitView}>
+            Fit
+          </Button>
           <Button
             size="sm"
             variant="secondary"
             onClick={() => {
               setOverrides({});
-              setPan({ x: size.w / 2, y: size.h / 2 });
-              setZoom(1);
+              fittedRef.current = "";
+              setTimeout(fitView, 0);
             }}
           >
-            Reset layout
+            Reset
           </Button>
-          <Link
-            to="/admin/fleet"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground"
-          >
-            Table view →
-          </Link>
+          <Button size="sm" variant="secondary" onClick={toggleFullscreen}>
+            {isFull ? "Exit full screen" : "Full screen"}
+          </Button>
         </div>
-      </div>
 
-      <div className="relative mt-5 overflow-hidden rounded-xl border bg-card">
-        <svg
-          ref={svgRef}
-          className="block h-[62vh] w-full touch-none select-none"
-          style={{ cursor: drag.current?.kind === "pan" ? "grabbing" : "grab" }}
-          onPointerDown={onBackgroundPointerDown}
+        <div
+          ref={canvasRef}
+          className={`relative w-full touch-none select-none ${isFull ? "h-screen" : "h-[64vh]"}`}
+          style={{
+            cursor: drag.current?.kind === "pan" ? "grabbing" : "grab",
+            backgroundImage: "radial-gradient(var(--border) 1px, transparent 1px)",
+            backgroundSize: `${26 * zoom}px ${26 * zoom}px`,
+            backgroundPosition: `${pan.x}px ${pan.y}px`,
+          }}
+          onPointerDown={onCanvasPointerDown}
           onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+          onPointerUp={onCanvasPointerUp}
           onWheel={onWheel}
         >
-          <defs>
-            {/* Blueprint grid - a faint dotted field so the canvas reads
-                as a workspace, and so panning is legible. */}
-            <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill="var(--border)" opacity="0.6" />
-            </pattern>
-          </defs>
-          <rect
-            x={-pan.x / zoom}
-            y={-pan.y / zoom}
-            width={size.w / zoom}
-            height={size.h / zoom}
-            transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}
-            fill="url(#grid)"
-          />
-
-          <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
-            {/* Edges first, so nodes sit on top of them. */}
-            {built.edges.map((e) => {
-              const a = nodeById[e.from];
-              const b = nodeById[e.to];
-              if (!a || !b) return null;
-              const pa = anchor(a, b.x, b.y);
-              const pb = anchor(b, a.x, a.y);
-              const mx = (pa.x + pb.x) / 2;
-              const my = (pa.y + pb.y) / 2;
-              const isSel = selected?.kind === "edge" && selected.id === e.id;
-              const color = isSel ? "var(--primary)" : stateColor(e.state);
-              return (
-                <g key={e.id}>
-                  {/* Wide invisible hit target so a thin line is still
-                      easy to click. */}
-                  <line
-                    x1={pa.x}
-                    y1={pa.y}
-                    x2={pb.x}
-                    y2={pb.y}
-                    stroke="transparent"
-                    strokeWidth={16}
-                    style={{ cursor: "pointer" }}
-                    onPointerDown={(ev) => {
-                      ev.stopPropagation();
-                      setSelected({ kind: "edge", id: e.id });
-                    }}
-                  />
-                  <line
-                    x1={pa.x}
-                    y1={pa.y}
-                    x2={pb.x}
-                    y2={pb.y}
-                    stroke={color}
-                    strokeWidth={isSel ? 3 : 1.75}
-                    strokeDasharray={e.dashed ? "5 5" : undefined}
-                    strokeLinecap="round"
-                  />
-                  {(isSel || zoom > 0.85) && (
-                    <text
-                      x={mx}
-                      y={my - 5}
-                      textAnchor="middle"
-                      fontSize={10}
-                      fill="var(--muted-foreground)"
-                      style={{ pointerEvents: "none" }}
-                    >
-                      {e.role}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-
-            {/* Nodes */}
-            {built.nodes.map((n) => {
-              const p = nodeById[n.id];
-              const isSel = selected?.kind === "node" && selected.id === n.id;
-              const color = stateColor(n.state);
-              const common = {
-                onPointerDown: (ev: React.PointerEvent) => onNodePointerDown(ev, n),
-                style: { cursor: "pointer" as const },
-              };
-              const drillable = view.mode === "fleet" && n.drillShuttleId != null;
-
-              if (n.kind === "portal" || n.kind === "shuttle") {
-                const r = n.kind === "portal" ? PORTAL_R : SHUTTLE_R;
+          <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+            <g style={{ transform, transformOrigin: "0 0" }}>
+              {built.edges.map((e) => {
+                const a = built.nodes.find((n) => n.id === e.from);
+                const b = built.nodes.find((n) => n.id === e.to);
+                if (!a || !b) return null;
+                const pa0 = nodePos[a.id];
+                const pb0 = nodePos[b.id];
+                const pa = anchor(a, pa0.x, pa0.y, pb0.x, pb0.y);
+                const pb = anchor(b, pb0.x, pb0.y, pa0.x, pa0.y);
+                const isSel = selected?.kind === "edge" && selected.id === e.id;
+                const isHover = hoverEdge === e.id;
+                const color = isSel ? "var(--primary)" : stateColor(e.state);
+                const mx = (pa.x + pb.x) / 2;
+                const my = (pa.y + pb.y) / 2;
                 return (
-                  <g key={n.id} transform={`translate(${p.x} ${p.y})`} {...common}>
-                    {isSel && <circle r={r + 6} fill="none" stroke="var(--primary)" strokeWidth={2} />}
-                    <circle
-                      r={r}
-                      fill="var(--card)"
-                      stroke={n.kind === "portal" ? "var(--primary)" : color}
-                      strokeWidth={n.kind === "portal" ? 2 : 3}
+                  <g key={e.id}>
+                    <line
+                      x1={pa.x}
+                      y1={pa.y}
+                      x2={pb.x}
+                      y2={pb.y}
+                      stroke="transparent"
+                      strokeWidth={18}
+                      className="pointer-events-auto cursor-pointer"
+                      onPointerDown={(ev) => {
+                        ev.stopPropagation();
+                        setSelected({ kind: "edge", id: e.id });
+                      }}
+                      onPointerEnter={() => setHoverEdge(e.id)}
+                      onPointerLeave={() => setHoverEdge((h) => (h === e.id ? null : h))}
                     />
-                    <text textAnchor="middle" y={-2} fontSize={12} fontWeight={700} fill="var(--foreground)">
-                      {n.label.length > 12 ? n.label.slice(0, 11) + "…" : n.label}
-                    </text>
-                    <text textAnchor="middle" y={13} fontSize={9} fill="var(--muted-foreground)">
-                      {drillable ? "click to open" : n.sub}
-                    </text>
+                    <line
+                      x1={pa.x}
+                      y1={pa.y}
+                      x2={pb.x}
+                      y2={pb.y}
+                      stroke={color}
+                      strokeWidth={isSel || isHover ? 2.5 : 1.6}
+                      strokeDasharray={e.dashed ? "6 5" : undefined}
+                      strokeLinecap="round"
+                      className="pointer-events-none"
+                    />
+                    {(isSel || isHover) && (
+                      <g style={{ pointerEvents: "none" }}>
+                        <rect
+                          x={mx - e.label.length * 3.6 - 6}
+                          y={my - 18}
+                          width={e.label.length * 7.2 + 12}
+                          height={17}
+                          rx={5}
+                          fill="var(--card)"
+                          stroke="var(--border)"
+                        />
+                        <text x={mx} y={my - 6} textAnchor="middle" fontSize={11} fill="var(--foreground)">
+                          {e.label}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 );
-              }
+              })}
+            </g>
+          </svg>
 
-              // Rectangle nodes (board / device / gpio / loose).
+          <div className="absolute inset-0" style={{ transform, transformOrigin: "0 0" }}>
+            {built.nodes.map((n) => {
+              const p = nodePos[n.id];
+              const s = SIZES[n.kind];
+              const isSel = selected?.kind === "node" && selected.id === n.id;
+              const color = stateColor(n.state);
+              const drillable = view.mode === "fleet" && n.drillShuttleId != null;
+              const round = s.round;
               const dashed = n.kind === "gpio" || n.kind === "loose";
               return (
-                <g key={n.id} transform={`translate(${p.x} ${p.y})`} {...common}>
-                  {isSel && (
-                    <rect
-                      x={-NODE_W / 2 - 4}
-                      y={-NODE_H / 2 - 4}
-                      width={NODE_W + 8}
-                      height={NODE_H + 8}
-                      rx={12}
-                      fill="none"
-                      stroke="var(--primary)"
-                      strokeWidth={2}
+                <div
+                  key={n.id}
+                  className="absolute flex flex-col justify-center"
+                  style={{
+                    left: p.x,
+                    top: p.y,
+                    width: s.w,
+                    height: s.h,
+                    transform: "translate(-50%, -50%)",
+                    cursor: "pointer",
+                    borderRadius: round ? 9999 : 12,
+                    background: "var(--card)",
+                    border: `${n.kind === "board" || round ? 2.5 : 1.5}px ${dashed ? "dashed" : "solid"} ${
+                      round && n.kind === "portal" ? "var(--primary)" : color
+                    }`,
+                    boxShadow: isSel
+                      ? "0 0 0 3px color-mix(in srgb, var(--primary) 55%, transparent)"
+                      : "0 1px 2px rgba(0,0,0,.05)",
+                    padding: round ? 0 : "8px 12px 8px 14px",
+                    alignItems: round ? "center" : "stretch",
+                    textAlign: round ? "center" : "left",
+                    overflow: "hidden",
+                  }}
+                  onPointerDown={(e) => onNodePointerDown(e, n)}
+                  onPointerUp={() => onNodePointerUp(n)}
+                >
+                  {!round && (
+                    <span
+                      className="absolute left-0 top-0 h-full"
+                      style={{ width: 5, background: color, borderTopLeftRadius: 12, borderBottomLeftRadius: 12 }}
                     />
                   )}
-                  <rect
-                    x={-NODE_W / 2}
-                    y={-NODE_H / 2}
-                    width={NODE_W}
-                    height={NODE_H}
-                    rx={10}
-                    fill="var(--card)"
-                    stroke={color}
-                    strokeWidth={n.kind === "board" ? 2.5 : 1.5}
-                    strokeDasharray={dashed ? "5 4" : undefined}
-                  />
-                  {/* A colour tab on the left edge, so state reads at a
-                      glance without relying on the outline alone. */}
-                  <rect x={-NODE_W / 2} y={-NODE_H / 2} width={5} height={NODE_H} rx={2} fill={color} />
-                  <text x={-NODE_W / 2 + 14} y={-3} fontSize={11} fontWeight={600} fill="var(--foreground)">
-                    {n.label.length > 20 ? n.label.slice(0, 19) + "…" : n.label}
-                  </text>
-                  <text
-                    x={-NODE_W / 2 + 14}
-                    y={12}
-                    fontSize={9}
-                    fill="var(--muted-foreground)"
-                    fontFamily="var(--font-mono, monospace)"
+                  <div className="flex items-center gap-1.5" style={{ minWidth: 0 }}>
+                    <span className="truncate font-semibold text-foreground" style={{ fontSize: round ? 13 : 12.5 }}>
+                      {n.title}
+                    </span>
+                    {n.chip && !round && (
+                      <span
+                        className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
+                        style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}
+                      >
+                        {n.chip}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="truncate"
+                    style={{
+                      fontSize: round ? 10 : 10.5,
+                      color: drillable ? "var(--primary)" : "var(--muted-foreground)",
+                      fontFamily:
+                        n.kind === "device" || n.kind === "gpio" || n.kind === "loose"
+                          ? "var(--font-mono, monospace)"
+                          : undefined,
+                    }}
                   >
-                    {(n.sub ?? "").length > 24 ? (n.sub ?? "").slice(0, 23) + "…" : n.sub}
-                  </text>
-                </g>
+                    {n.sub}
+                  </div>
+                  {n.badge && !round && (
+                    <span
+                      className="mt-0.5 w-fit rounded px-1.5 py-px text-[9px] font-semibold"
+                      style={{
+                        color: stateColor(n.badge.state),
+                        border: `1px solid color-mix(in srgb, ${stateColor(n.badge.state)} 40%, var(--border))`,
+                      }}
+                    >
+                      {n.badge.text}
+                    </span>
+                  )}
+                </div>
               );
             })}
-          </g>
-        </svg>
+          </div>
 
-        {/* Selection panel - floats over the canvas rather than pushing
-            it, so the graph never reflows when you click around. */}
+          {built.nodes.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-sm text-muted-foreground">
+                {shuttles.length === 0 ? "No shuttles enrolled yet." : "Nothing to show."}
+              </p>
+            </div>
+          )}
+        </div>
+
         {panel && (
-          <div className="absolute right-3 top-3 w-64 rounded-lg border bg-card/95 p-3 shadow-lg backdrop-blur">
+          <div className="absolute right-3 top-3 z-20 w-64 rounded-lg border bg-card/95 p-3 shadow-lg backdrop-blur">
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-semibold">{panel.title}</p>
               <button
@@ -862,19 +954,8 @@ export default function FleetGraphPage() {
             </dl>
           </div>
         )}
-
-        {built.nodes.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              {shuttles.length === 0 ? "No shuttles enrolled yet." : "Nothing to show here."}
-            </p>
-          </div>
-        )}
       </div>
 
-      {/* Legend - the solid/dashed distinction is load-bearing: dashed
-          things are recorded by a person or reached over the network, so
-          the graph cannot detect their absence. */}
       <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--success)" }} /> ok
@@ -886,7 +967,7 @@ export default function FleetGraphPage() {
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: "var(--destructive)" }} /> fault
         </span>
-        <span>— solid: seen over USB · - - dashed: recorded / over the network</span>
+        <span>solid: seen over USB · dashed: recorded / over the network</span>
       </div>
     </div>
   );
