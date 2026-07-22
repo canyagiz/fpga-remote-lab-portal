@@ -433,6 +433,90 @@ def test_a_board_can_be_revised_after_registration(client):
     assert bad.status_code == 400
 
 
+def test_a_template_for_an_absent_board_does_not_borrow_another_boards_hardware(client):
+    """The worst version of this bug: a lab whose board is not even here
+    reporting that its capture card has a signal, because some other
+    board's card was on the same shuttle."""
+    _admin(client)
+    _, token = _enrol(client)
+    _post(client, token, _report([BLASTER, MAGEWELL], _signal("D206240701386", True)))
+    _register_board(client, video_capture_serial="D206240701386", gpio_endpoint="10.30.70.50:20000")
+
+    absent = _template(
+        client,
+        name="Cyclone V Lab",
+        requirements=[
+            {"type": "fpga", "family": "cyclone_v"},
+            {"type": "video_capture", "require_signal": True},
+            {"type": "gpio"},
+        ],
+    )
+    results = {
+        r["type"]: r
+        for r in client.get(f"/api/admin/fleet/templates/{absent}/gaps").json()[0]["results"]
+    }
+    assert results["fpga"]["status"] == "missing"
+    assert results["video_capture"]["status"] == "missing"
+    assert results["gpio"]["status"] == "missing"
+    assert "cyclone_v" in results["video_capture"]["message"]
+
+
+def test_gpio_names_the_board_s_own_controller(client):
+    """Two boards, two different controllers - a Cyclone lab must not
+    report the Arty's UART bridge as driving its switches."""
+    _admin(client)
+    _, token = _enrol(client)
+    _post(client, token, _report([BLASTER, FTDI, MAGEWELL], _signal("D206240701386", True)))
+    _register_board(
+        client, video_capture_serial="D206240701386", gpio_endpoint="10.30.70.50:20000"
+    )
+    _register_board(
+        client,
+        label="Arty #1",
+        family="zynq_7020",
+        programmer_serial="003017A6FDC3",
+        gpio_endpoint="10.30.70.45:20000",
+    )
+
+    template_id = _template(
+            client,
+            requirements=[
+                {"type": "fpga", "family": "cyclone_iv"},
+                {"type": "gpio"},
+            ],
+        )
+    civ_gpio = next(
+        r
+        for r in client.get(f"/api/admin/fleet/templates/{template_id}/gaps").json()[0]["results"]
+        if r["type"] == "gpio"
+    )
+    assert civ_gpio["status"] == "satisfied"
+    assert "10.30.70.50:20000" in civ_gpio["message"]
+    assert "10.30.70.45:20000" not in civ_gpio["message"]
+
+
+def test_a_board_with_no_gpio_controller_is_reported(client):
+    _admin(client)
+    _, token = _enrol(client)
+    _post(client, token, _report([BLASTER, MAGEWELL], _signal("D206240701386", True)))
+    _register_board(client, video_capture_serial="D206240701386")  # no gpio_endpoint
+
+    template_id = _template(
+            client,
+            requirements=[
+                {"type": "fpga", "family": "cyclone_iv"},
+                {"type": "gpio"},
+            ],
+        )
+    gpio = next(
+        r
+        for r in client.get(f"/api/admin/fleet/templates/{template_id}/gaps").json()[0]["results"]
+        if r["type"] == "gpio"
+    )
+    assert gpio["status"] == "missing"
+    assert "EduPow CIV #10" in gpio["message"]
+
+
 # ---- the spare side --------------------------------------------------
 
 def test_hardware_no_template_wants_is_reported_as_spare(client):

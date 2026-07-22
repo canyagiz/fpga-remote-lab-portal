@@ -43,6 +43,14 @@ class ShuttleInventory:
     # shuttle. None when the template names no family, in which case the
     # question genuinely is about the shuttle.
     subject_board: Board | None = None
+    # What the template ASKED for, as opposed to what was found. The two
+    # differ in a way that matters: a template naming no family is
+    # genuinely a question about the shuttle, while a template naming
+    # one whose board is absent cannot have its per-board requirements
+    # answered at all - and answering them against whatever else is
+    # plugged in reports a capture card as healthy for a board that is
+    # not there.
+    subject_family: FpgaFamily | None = None
 
     def find_board(self, family: FpgaFamily) -> Board | None:
         for board in self.boards:
@@ -136,11 +144,13 @@ def evaluate(template: LabTemplate, inventory: ShuttleInventory) -> GapReport:
     # about. A template that names no fpga family is not about a
     # particular board, and subject_board stays None.
     subject = None
+    family = None
     for requirement in parsed:
         if isinstance(requirement, req.FpgaRequirement):
-            subject = inventory.find_board(family=requirement.family)
+            family = requirement.family
+            subject = inventory.find_board(family=family)
             break
-    scoped = replace(inventory, subject_board=subject)
+    scoped = replace(inventory, subject_board=subject, subject_family=family)
 
     return GapReport(
         shuttle_id=inventory.shuttle.id,

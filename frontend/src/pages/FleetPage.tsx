@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -293,7 +294,15 @@ export default function FleetPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="text-2xl font-bold tracking-tight">Fleet</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Fleet</h1>
+        <Link
+          to="/admin/fleet/graph"
+          className="text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          Topology view →
+        </Link>
+      </div>
       <p className="mt-1 text-sm text-muted-foreground">
         {shuttles.length} shuttle{shuttles.length === 1 ? "" : "s"} ({onlineCount} online) ·{" "}
         {devices.length} device{devices.length === 1 ? "" : "s"} attached · {boards.length} registered

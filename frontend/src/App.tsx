@@ -6,6 +6,7 @@ import { useAuth } from "./context/AuthContext";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import CalendarPage from "./pages/CalendarPage";
 import DashboardPage from "./pages/DashboardPage";
+import FleetGraphPage from "./pages/FleetGraphPage";
 import FleetPage from "./pages/FleetPage";
 import HomePage from "./pages/HomePage";
 import LabsPage from "./pages/LabsPage";
@@ -59,6 +60,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <UserProfilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/fleet/graph"
+          element={
+            <ProtectedRoute adminOnly>
+              <FleetGraphPage />
             </ProtectedRoute>
           }
         />

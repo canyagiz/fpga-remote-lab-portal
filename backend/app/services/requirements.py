@@ -140,6 +140,16 @@ class VideoCaptureRequirement(Requirement):
     def check(self, inv: "ShuttleInventory") -> RequirementResult:
         board = inv.subject_board
 
+        if board is None and inv.subject_family is not None:
+            # The template is about a board that is not here. Falling
+            # back to the shuttle would report some other board's card
+            # as this lab's, which is how a lab with no hardware at all
+            # ends up looking half-ready.
+            return self._result(
+                RequirementStatus.missing,
+                f"No {inv.subject_family.value} board here to resolve a capture card for",
+            )
+
         if board is not None:
             if not board.video_capture_serial:
                 return self._result(
@@ -202,6 +212,28 @@ class GpioRequirement(Requirement):
     type: Literal["gpio"] = "gpio"
 
     def check(self, inv: "ShuttleInventory") -> RequirementResult:
+        board = inv.subject_board
+
+        if board is None and inv.subject_family is not None:
+            return self._result(
+                RequirementStatus.missing,
+                f"No {inv.subject_family.value} board here to resolve a GPIO controller for",
+            )
+
+        if board is not None:
+            # This board's own controller, not every endpoint on the
+            # shuttle. Listing them all made a Cyclone lab report the
+            # Arty's UART bridge as if it drove its switches.
+            if not board.gpio_endpoint:
+                return self._result(
+                    RequirementStatus.missing,
+                    f"No GPIO controller is assigned to {board.label}",
+                )
+            return self._result(
+                RequirementStatus.satisfied,
+                f"{board.label} is driven by {board.gpio_endpoint} (not probed)",
+            )
+
         boards = [b for b in inv.boards if b.gpio_endpoint]
         if not boards:
             return self._result(
