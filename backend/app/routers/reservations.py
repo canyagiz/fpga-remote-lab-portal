@@ -61,6 +61,13 @@ def _utc(dt: datetime) -> datetime:
 
 def _to_out(reservation: Reservation) -> ReservationOut:
     usage_start = reservation.usage_start_time
+    # session_ends_at counts down from hardware_started_at, not
+    # usage_start_time - the reservation can be "active" (board claimed,
+    # occupying the calendar) well before the hardware session actually
+    # opens, and a failed /access attempt in between must not make the
+    # frontend show (or count down) time the user was never granted. See
+    # models.py::Reservation.hardware_started_at.
+    hardware_start = reservation.hardware_started_at
     deadline = _access_deadline(reservation)
     return ReservationOut(
         id=reservation.id,
@@ -72,7 +79,7 @@ def _to_out(reservation: Reservation) -> ReservationOut:
         queue_position=reservation.queue_position,
         created_at=reservation.created_at,
         usage_start_time=_utc(usage_start) if usage_start is not None else None,
-        session_ends_at=_utc(usage_start + _SESSION_LENGTH) if usage_start is not None else None,
+        session_ends_at=_utc(hardware_start + _SESSION_LENGTH) if hardware_start is not None else None,
         access_deadline=_utc(deadline) if deadline is not None else None,
     )
 

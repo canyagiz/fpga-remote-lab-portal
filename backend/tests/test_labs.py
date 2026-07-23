@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from app.services.weblab import WeblabSessionError
@@ -61,14 +61,25 @@ def test_next_available_at_is_null_for_a_free_board(client):
 
 
 def test_next_available_at_reflects_the_active_session_end(client):
+    """next_available_at reflects when the reservation's occupied window
+    ends (usage_start_time + session length, set the moment the board is
+    claimed - see services/availability.py), not session_ends_at, which
+    only appears once the hardware session actually opens (see
+    test_failed_hardware_start_does_not_start_the_session_clock) and isn't
+    set here since this test never calls /access."""
+    from app.config import settings
+
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")
     login(client, "user1")
     resv = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
+    assert resv["session_ends_at"] is None
+    usage_start = datetime.fromisoformat(resv["usage_start_time"])
+    expected_end = usage_start + timedelta(seconds=settings.session_duration_seconds)
 
     labs = client.get("/api/labs").json()
     created = next(lab for lab in labs if lab["id"] == lab_id)
-    assert created["next_available_at"] == resv["session_ends_at"]
+    assert datetime.fromisoformat(created["next_available_at"]) == expected_end
 
 
 def test_next_available_at_skips_past_back_to_back_scheduled_reservations(client):
@@ -83,6 +94,7 @@ def test_next_available_at_skips_past_back_to_back_scheduled_reservations(client
     test_reservation_requires_minimum_advance_notice; this test is only
     about next_available_at's own chaining logic.
     """
+    from app.config import settings
     from app.database import SessionLocal
     from app.models import Reservation, ReservationStatus, User
 
@@ -90,7 +102,12 @@ def test_next_available_at_skips_past_back_to_back_scheduled_reservations(client
     register(client, "user1", "user1@example.com")
     login(client, "user1")
     resv = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
-    session_end = datetime.fromisoformat(resv["session_ends_at"]).replace(tzinfo=None)
+    # session_ends_at isn't set yet (no /access call was made - see
+    # test_next_available_at_reflects_the_active_session_end), so derive
+    # the reservation's occupied-window end the same way availability.py
+    # does: usage_start_time + session length.
+    usage_start = datetime.fromisoformat(resv["usage_start_time"]).replace(tzinfo=None)
+    session_end = usage_start + timedelta(seconds=settings.session_duration_seconds)
 
     register(client, "user2", "user2@example.com")
 
@@ -187,6 +204,48 @@ def test_access_returns_502_when_hardware_session_start_fails(client):
     ):
         response = client.get(f"/api/labs/{lab_id}/access")
     assert response.status_code == 502
+
+
+def test_failed_hardware_start_does_not_start_the_session_clock(client):
+    """Regression test: session_ends_at (the countdown the frontend shows
+    and counts down against) used to be derived from usage_start_time,
+    which access-now sets the instant a reservation is promoted to active -
+    before the hardware session is ever attempted. A hardware failure on
+    the first /access call then left the reservation "active" with a
+    countdown already ticking, even though the user was never let in. See
+    test_fleet_deployments.py::test_a_capture_card_rejection_does_not_start_the_session_countdown
+    for the same fix exercised through a real deployment-health rejection
+    (the 503 path); this test covers the plain start_weblab_session
+    failure (502) path instead.
+    """
+    lab_id = _create_lab(client)
+    register(client, "user1", "user1@example.com")
+    login(client, "user1")
+    client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+
+    with patch(
+        "app.routers.labs.start_weblab_session",
+        side_effect=WeblabSessionError("Hardware container refused to start a session"),
+    ):
+        failed = client.get(f"/api/labs/{lab_id}/access")
+    assert failed.status_code == 502
+
+    mine = client.get("/api/reservations/mine").json()
+    reservation = next(r for r in mine if r["lab_id"] == lab_id)
+    assert reservation["status"] == "active"
+    assert reservation["usage_start_time"] is not None
+    assert reservation["session_ends_at"] is None
+
+    with patch(
+        "app.routers.labs.start_weblab_session",
+        return_value="http://10.30.70.23:5003/foo/callback/fake-session-id",
+    ):
+        recovered = client.get(f"/api/labs/{lab_id}/access")
+    assert recovered.status_code == 200
+
+    mine = client.get("/api/reservations/mine").json()
+    reservation = next(r for r in mine if r["lab_id"] == lab_id)
+    assert reservation["session_ends_at"] is not None
 
 
 def test_access_denied_for_a_second_user_while_board_is_in_use(client):

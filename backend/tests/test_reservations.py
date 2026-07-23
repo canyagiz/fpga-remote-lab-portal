@@ -427,7 +427,17 @@ def test_access_rejected_when_a_scheduled_reservation_covers_now(client):
     assert access.status_code == 409
 
 
-def test_reservation_out_includes_session_ends_at_only_when_active(client):
+def test_access_now_marks_active_without_starting_the_session_countdown(client):
+    """access-now promotes a reservation to active immediately (it still
+    needs to occupy the board's calendar slot right away - see
+    test_calendar.py), but session_ends_at - the countdown the frontend
+    shows and disables Finish/Cancel against - must stay unset until the
+    hardware session actually opens via GET /labs/{id}/access. Otherwise a
+    hardware failure on that call (see
+    test_labs.py::test_failed_hardware_start_does_not_start_the_session_clock,
+    test_fleet_deployments.py::test_a_capture_card_rejection_does_not_start_the_session_countdown)
+    would burn session time the user never got to use.
+    """
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")
     login(client, "user1")
@@ -447,9 +457,9 @@ def test_reservation_out_includes_session_ends_at_only_when_active(client):
     register(client, "user2", "user2@example.com")
     login(client, "user2")
     active = client.post("/api/reservations/access-now", json={"lab_id": lab_id}).json()
+    assert active["status"] == "active"
     assert active["usage_start_time"] is not None
-    assert active["session_ends_at"] is not None
-    assert active["session_ends_at"] > active["usage_start_time"]
+    assert active["session_ends_at"] is None
 
 
 def test_cannot_finish_a_session_that_already_ran_out_of_time(client):

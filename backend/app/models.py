@@ -147,6 +147,19 @@ class Reservation(Base):
     # would start a brand-new independent session on the same physical
     # board, letting several tabs control the same hardware at once.
     weblab_session_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Separate from usage_start_time on purpose: usage_start_time marks
+    # when the reservation itself was promoted to active (used for the
+    # board's occupied window, the calendar, and the "demoed" stat - see
+    # services/availability.py and routers/stats.py), which must stay put
+    # the instant a board is claimed. hardware_started_at instead marks
+    # when start_weblab_session actually succeeded, and is what the
+    # session countdown shown to the user (session_ends_at) is computed
+    # from - so a deployment-health failure (a detached capture card, an
+    # offline shuttle - see services/deployments.py) or a CT300-side
+    # failure never counts against the user's session length before
+    # they've even gotten in. Left null while stuck retrying; set once,
+    # the first time access_lab's hardware call succeeds.
+    hardware_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="reservations")
     lab: Mapped["Lab"] = relationship(back_populates="reservations")

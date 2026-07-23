@@ -7,6 +7,8 @@ deployment adds: the address comes from wherever the board actually is,
 and a lab whose hardware is not fit to serve stops being offered.
 """
 
+from unittest.mock import patch
+
 from tests.helpers import login, make_admin, register
 
 
@@ -238,6 +240,60 @@ def test_access_is_refused_even_with_a_direct_link(client):
     response = client.get(f"/api/labs/{lab_id}/access")
     assert response.status_code == 503
     assert "temporarily unavailable" in response.json()["detail"]
+
+
+def test_a_capture_card_rejection_does_not_start_the_session_countdown(client):
+    """Regression test for a real incident: a student's reservation went
+    active (access-now), the board's capture card turned out to be
+    unplugged (deployment health rejects /access with a 503 - "This lab
+    is temporarily unavailable: ... capture card ... is not attached to
+    this shuttle"), and the reservation kept counting down a session the
+    student was never let into - a second attempt after the card was
+    reconnected would find less and less time left, or none at all.
+
+    session_ends_at must stay null through the rejection (usage_start_time,
+    which anchors the calendar slot, is unaffected and still set), and
+    only start once /access actually succeeds.
+    """
+    _admin(client)
+    # Board bound, but no capture card reported at all - reproduces
+    # "<board>'s capture card (<serial>) is not attached to this shuttle".
+    _, token = _fleet(client, devices=[BLASTER])
+    lab_id = _lab_id(client)
+    _deploy(client, lab_id, _template(client), _board(client))
+
+    _student(client)
+    client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+
+    rejected = client.get(f"/api/labs/{lab_id}/access")
+    assert rejected.status_code == 503
+    assert "capture card" in rejected.json()["detail"]
+    assert "not attached to this shuttle" in rejected.json()["detail"]
+
+    mine = client.get("/api/reservations/mine").json()
+    reservation = next(r for r in mine if r["lab_id"] == lab_id)
+    assert reservation["status"] == "active"
+    assert reservation["usage_start_time"] is not None
+    assert reservation["session_ends_at"] is None
+
+    # Card gets plugged back in - a retry now succeeds and only then
+    # starts the countdown, fresh, rather than resuming one already
+    # burned by the earlier rejection.
+    client.post(
+        "/api/inventory/report",
+        json=_report([BLASTER, MAGEWELL]),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    with patch(
+        "app.routers.labs.start_weblab_session",
+        return_value="http://10.30.70.23:5001/foo/callback/fake-session-id",
+    ):
+        recovered = client.get(f"/api/labs/{lab_id}/access")
+    assert recovered.status_code == 200
+
+    mine = client.get("/api/reservations/mine").json()
+    reservation = next(r for r in mine if r["lab_id"] == lab_id)
+    assert reservation["session_ends_at"] is not None
 
 
 def test_an_admin_can_take_a_lab_out_of_service_without_unbinding_it(client):

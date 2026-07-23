@@ -121,8 +121,16 @@ def access_lab(
     # Access more than once) would give each of them independent,
     # simultaneous control over the same hardware.
     if reservation.weblab_session_url is None:
-        if reservation.usage_start_time is not None:
-            elapsed = (datetime.utcnow() - reservation.usage_start_time).total_seconds()
+        # Based on hardware_started_at, not usage_start_time: usage_start_time
+        # marks when the reservation was claimed (and keeps the board's
+        # calendar window and expiry sweep anchored to that instant - see
+        # models.py), but the hardware clock itself must only start once a
+        # session actually opens. Otherwise a failed attempt below (a
+        # deployment-health rejection above, CT300 mid-restart, ...) would
+        # already have "spent" time against a session the user was never
+        # let into, and every retry would be handed a shorter duration.
+        if reservation.hardware_started_at is not None:
+            elapsed = (datetime.utcnow() - reservation.hardware_started_at).total_seconds()
         else:
             elapsed = 0
         remaining = max(int(settings.session_duration_seconds - elapsed), 30)
@@ -144,6 +152,7 @@ def access_lab(
                 detail=f"Could not start a session on the lab hardware: {err}",
             )
         reservation.weblab_session_url = session_url
+        reservation.hardware_started_at = datetime.utcnow()
         db.commit()
     else:
         session_url = reservation.weblab_session_url
