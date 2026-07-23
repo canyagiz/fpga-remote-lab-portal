@@ -98,6 +98,32 @@ def _arp_table() -> dict[str, str]:
     return table
 
 
+def parse_endpoint(endpoint: str) -> tuple[str, int] | None:
+    """Split "10.30.70.50:20000" into (host, port), or None if malformed."""
+    endpoint = (endpoint or "").strip()
+    if ":" not in endpoint:
+        return None
+    host, _, port = endpoint.rpartition(":")
+    if not host:
+        return None
+    try:
+        return host, int(port)
+    except ValueError:
+        return None
+
+
+def is_reachable(host: str, port: int, timeout: float = CONNECT_TIMEOUT) -> bool:
+    """A single synchronous connect - "is this actually on the network
+    right now". Used to refuse binding a board to a controller that is
+    not reachable, so a typo or an unplugged Pi is caught at the point of
+    entry rather than surfacing later as a mysteriously broken lab."""
+    try:
+        with socket.create_connection((host, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
 async def _probe(ip: str, port: int) -> bool:
     try:
         reader, writer = await asyncio.wait_for(

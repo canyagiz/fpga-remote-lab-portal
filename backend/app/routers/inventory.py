@@ -62,6 +62,7 @@ from app.security import (
     parse_shuttle_token,
     verify_shuttle_secret,
 )
+from app.config import settings
 from app.services import deployments, discovery, inventory, matching
 from app.services import requirements as requirements_module
 
@@ -317,6 +318,30 @@ def list_unclaimed(db: Session = Depends(get_db)):
     ]
 
 
+def _validate_gpio_reachable(endpoint: str | None) -> None:
+    """A GPIO controller must actually answer on the network when it is
+    set - the point of tying this to discovery is that you cannot bind a
+    board to a Pi that is not there. Skipped in tests (no such network).
+    """
+    if not endpoint or not settings.verify_endpoint_reachability:
+        return
+    parsed = discovery.parse_endpoint(endpoint)
+    if parsed is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"GPIO endpoint must be host:port, e.g. 10.30.70.50:20000 (got {endpoint!r})",
+        )
+    host, port = parsed
+    if not discovery.is_reachable(host, port):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{endpoint} is not reachable on the network right now. Pick a controller "
+                "from Discovery, or check the Pi is powered and its io_interface is running."
+            ),
+        )
+
+
 @admin_router.post("/boards", response_model=BoardOut, status_code=201)
 def register_board(
     payload: BoardCreate,
@@ -347,6 +372,8 @@ def register_board(
                 "agent on that shuttle to report."
             ),
         )
+
+    _validate_gpio_reachable(payload.gpio_endpoint)
 
     board = Board(
         label=payload.label.strip(),
@@ -413,6 +440,9 @@ def update_board(board_id: int, payload: BoardUpdate, db: Session = Depends(get_
                     f"{fields['video_capture_serial']!r}"
                 ),
             )
+
+    if fields.get("gpio_endpoint"):
+        _validate_gpio_reachable(fields["gpio_endpoint"])
 
     for name, value in fields.items():
         if name == "family":

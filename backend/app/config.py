@@ -83,5 +83,10 @@ class Settings(BaseSettings):
     # mail-less example.com domain.
     verify_email_deliverability: bool = True
 
+    # A board's GPIO controller must be reachable on the network when it
+    # is set - a typo or an unplugged Pi is refused rather than saved to
+    # fail later. Off in tests, which have no such network.
+    verify_endpoint_reachability: bool = True
+
 
 settings = Settings()

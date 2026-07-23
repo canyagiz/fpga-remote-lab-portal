@@ -14,6 +14,9 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_fpga_remote_lab.db"
 # reserves specifically to never accept mail, so it would always fail
 # that check. Off here; still on by default everywhere else.
 os.environ["VERIFY_EMAIL_DELIVERABILITY"] = "false"
+# Board GPIO endpoints in tests point at real lab addresses that are not
+# reachable from the test host - skip the reachability gate here.
+os.environ["VERIFY_ENDPOINT_REACHABILITY"] = "false"
 # Deterministic root-admin allowlist for the tests, so they don't depend on
 # the real Andrea/Yagiz addresses baked into config.py's defaults. Anyone
 # registering with root@example.com is auto-promoted (see

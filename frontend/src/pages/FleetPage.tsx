@@ -95,6 +95,10 @@ export default function FleetPage() {
   const [issuedToken, setIssuedToken] = useState<{ name: string; token: string } | null>(null);
   const [claiming, setClaiming] = useState<UnclaimedDevice | null>(null);
   const [newShuttleName, setNewShuttleName] = useState("");
+  // Which board/shuttle a network-backed endpoint is being set for.
+  const [gpioBoard, setGpioBoard] = useState<Board | null>(null);
+  const [addressShuttle, setAddressShuttle] = useState<Shuttle | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -118,6 +122,7 @@ export default function FleetPage() {
       setDeployments(dep);
       setUnused(un);
       setLabs(l);
+      setLastRefresh(new Date().toISOString());
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Failed to load fleet data");
     }
@@ -165,17 +170,18 @@ export default function FleetPage() {
     }
   }
 
-  async function handleAddress(shuttle: Shuttle) {
-    const address = prompt(
-      `Address where ${shuttle.name}'s lab containers are reached (e.g. 10.30.70.23).\n\n` +
-        `This is what student browsers are sent to, which is why it is set here rather than taken from the agent's own report.`,
-      shuttle.address ?? "",
-    );
-    if (!address?.trim()) return;
+  function handleAddress(shuttle: Shuttle) {
+    setAddressShuttle(shuttle);
+    if (!scan && !scanning) void handleScan();
+  }
+
+  async function saveAddress(shuttle: Shuttle, address: string) {
+    if (!address.trim()) return;
     setBusy(`addr-${shuttle.id}`);
     try {
       await api.setShuttleAddress(shuttle.id, address.trim());
       showSuccess(`${shuttle.name} address set`);
+      setAddressShuttle(null);
       await refresh();
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Failed to set address");
@@ -224,17 +230,20 @@ export default function FleetPage() {
     }
   }
 
-  async function handleSetGpio(board: Board, suggested?: string) {
-    const endpoint = prompt(
-      `GPIO controller (Raspberry Pi) endpoint for ${board.label}, e.g. 10.30.70.50:20000.\n\n` +
-        `Leave blank to clear.`,
-      suggested ?? board.gpio_endpoint ?? "",
-    );
-    if (endpoint === null) return;
+  function handleSetGpio(board: Board) {
+    setGpioBoard(board);
+    if (!scan && !scanning) void handleScan();
+  }
+
+  async function saveGpio(board: Board, endpoint: string) {
     setBusy(`board-${board.id}`);
     try {
+      // Empty clears it. A non-empty endpoint the network cannot reach is
+      // refused by the backend, which is the point of tying this to
+      // Discovery - you cannot bind a Pi that is not there.
       await api.updateBoard(board.id, { gpio_endpoint: endpoint.trim() || "" });
       showSuccess(`${board.label} updated`);
+      setGpioBoard(null);
       await refresh();
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Failed to update board");
@@ -320,6 +329,17 @@ export default function FleetPage() {
   }
 
   const captureDevices = devices.filter((d) => d.kind === "video_capture");
+  // Serials an agent is reporting right now - so the Boards table can
+  // show whether a recorded programmer/capture is still physically there.
+  const presentSerials = new Set(devices.map((d) => d.usb_serial).filter(Boolean) as string[]);
+  // Pis usable as GPIO endpoints, and hosts usable as shuttle addresses,
+  // straight from the last network scan.
+  const discoveredGpio = (scan?.hosts ?? [])
+    .filter((h) => h.kind === "raspberry_pi" && h.open_ports.includes(20000))
+    .map((h) => ({ value: `${h.ip}:20000`, label: `Raspberry Pi ${h.ip}`, note: h.note ?? undefined }));
+  const discoveredAddresses = (scan?.hosts ?? [])
+    .filter((h) => h.kind === "proxmox" || h.kind === "host")
+    .map((h) => ({ value: h.ip, label: h.ip, note: h.vendor }));
   const knownSignatures = Array.from(
     new Set(devices.filter((d) => d.kind === "programmer" && d.signature).map((d) => d.signature as string)),
   ).sort();
@@ -361,9 +381,15 @@ export default function FleetPage() {
             {boards.length} board{boards.length === 1 ? "" : "s"} · {readyLabs}/{gaps.length || 0} labs ready
           </p>
         </div>
-        <Link to="/admin/fleet/graph" className="text-sm font-medium text-muted-foreground hover:text-foreground">
-          Topology view →
-        </Link>
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-xs text-muted-foreground">updated {formatWhen(lastRefresh)}</span>
+          <button onClick={refresh} className="font-medium text-muted-foreground hover:text-foreground">
+            Refresh
+          </button>
+          <Link to="/admin/fleet/graph" className="font-medium text-muted-foreground hover:text-foreground">
+            Topology view →
+          </Link>
+        </div>
       </div>
 
       <div className="mt-6 flex flex-col gap-6 md:flex-row">
@@ -601,7 +627,7 @@ export default function FleetPage() {
                           <TableHead>Role</TableHead>
                           <TableHead>Port</TableHead>
                           <TableHead>Used by</TableHead>
-                          <TableHead>Health</TableHead>
+                          <TableHead>Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -628,14 +654,19 @@ export default function FleetPage() {
                                   {board ? board.label : <span className="text-muted-foreground">not claimed</span>}
                                 </TableCell>
                                 <TableCell>
-                                  {d.kind !== "video_capture" ? (
-                                    <span className="text-muted-foreground">—</span>
-                                  ) : d.has_video_signal === true ? (
-                                    <Badge variant="success">signal</Badge>
-                                  ) : d.has_video_signal === false ? (
-                                    <Badge variant="destructive">no signal</Badge>
+                                  {/* Every reported device is connected right now (the list
+                                      only shows present ones); a capture card additionally
+                                      says whether an HDMI signal is arriving. */}
+                                  {d.kind === "video_capture" ? (
+                                    d.has_video_signal === true ? (
+                                      <Badge variant="success">signal</Badge>
+                                    ) : d.has_video_signal === false ? (
+                                      <Badge variant="destructive">no signal</Badge>
+                                    ) : (
+                                      <Badge variant="outline">signal unknown</Badge>
+                                    )
                                   ) : (
-                                    <Badge variant="outline">unknown</Badge>
+                                    <Badge variant="success">connected</Badge>
                                   )}
                                 </TableCell>
                               </TableRow>
@@ -678,12 +709,30 @@ export default function FleetPage() {
                           <TableRow key={b.id}>
                             <TableCell className="font-medium">{b.label}</TableCell>
                             <TableCell>{familyLabel(b.family)}</TableCell>
-                            <TableCell className="font-mono text-xs">{b.programmer_serial}</TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {b.programmer_serial}
+                              {presentSerials.has(b.programmer_serial) ? (
+                                <span className="ml-1.5 align-middle text-[10px] font-semibold" style={{ color: "var(--success)" }}>● present</span>
+                              ) : (
+                                <span className="ml-1.5 align-middle text-[10px] font-semibold" style={{ color: "var(--destructive)" }}>● absent</span>
+                              )}
+                            </TableCell>
                             <TableCell>
                               {b.shuttle_name ? b.shuttle_name : <span className="text-muted-foreground">not attached</span>}
                             </TableCell>
                             <TableCell className="font-mono text-xs">
-                              {b.video_capture_serial ?? <span className="text-warning-muted-foreground">not set</span>}
+                              {b.video_capture_serial ? (
+                                <>
+                                  {b.video_capture_serial}
+                                  {presentSerials.has(b.video_capture_serial) ? (
+                                    <span className="ml-1.5 align-middle text-[10px] font-semibold" style={{ color: "var(--success)" }}>● present</span>
+                                  ) : (
+                                    <span className="ml-1.5 align-middle text-[10px] font-semibold" style={{ color: "var(--destructive)" }}>● absent</span>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-warning-muted-foreground">not set</span>
+                              )}
                             </TableCell>
                             <TableCell className="font-mono text-xs text-muted-foreground">{b.gpio_endpoint ?? "—"}</TableCell>
                             <TableCell className="text-right">
@@ -826,62 +875,82 @@ export default function FleetPage() {
             <>
               <Card>
                 <CardHeader>
-                  <CardTitle>Deployments</CardTitle>
+                  <CardTitle>Labs &amp; serving</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="mb-3 text-sm text-muted-foreground">
-                    A deployment binds a catalogue entry to a real board. Until a lab has one it keeps its static address
-                    and is listed exactly as before — and unbinding returns it to that state.
+                    Every lab is served one of two ways. <strong className="font-semibold text-foreground">Static</strong> —
+                    the fixed address from <code className="font-mono text-xs">labs.yaml</code>; it works (which is why
+                    Cyclone IV and Arty are reachable now), but nothing checks the hardware, so a broken board is only
+                    found by a student. <strong className="font-semibold text-foreground">Bound to a board</strong> — the
+                    address is resolved from wherever the board actually is, and the lab is continuously health-checked,
+                    withdrawn automatically the moment its hardware fails. Binding is what turns monitoring on.
                   </p>
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Lab</TableHead>
-                          <TableHead>Board</TableHead>
-                          <TableHead>Resolved address</TableHead>
+                          <TableHead>Serving from</TableHead>
+                          <TableHead>Monitored</TableHead>
                           <TableHead>State</TableHead>
                           <TableHead />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {deployments.length === 0 ? (
-                          <EmptyRow colSpan={5}>No labs are bound to a board yet, so every lab still uses its static address.</EmptyRow>
+                        {labs.length === 0 ? (
+                          <EmptyRow colSpan={5}>No labs in the catalogue.</EmptyRow>
                         ) : (
-                          deployments.map((d) => (
-                            <TableRow key={d.id}>
-                              <TableCell className="font-medium">{d.lab_name}</TableCell>
-                              <TableCell>
-                                {d.board_label}
-                                <span className="text-muted-foreground"> :{d.port}</span>
-                              </TableCell>
-                              <TableCell className="font-mono text-xs">
-                                {d.backend_url ?? <span className="text-muted-foreground">unresolved</span>}
-                              </TableCell>
-                              <TableCell>
-                                {d.available ? (
-                                  <Badge variant="success">serving</Badge>
-                                ) : (
-                                  <div className="flex flex-col gap-1">
-                                    <Badge variant="destructive" className="w-fit">
-                                      withdrawn
-                                    </Badge>
-                                    <span className="text-xs text-muted-foreground">{d.reason}</span>
-                                  </div>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button size="sm" variant="secondary" disabled={busy === `dep-${d.id}`} onClick={() => handleToggleDeployment(d)}>
-                                    {d.is_enabled ? "Pause" : "Resume"}
-                                  </Button>
-                                  <Button size="sm" variant="destructive" disabled={busy === `dep-${d.id}`} onClick={() => handleUnbind(d)}>
-                                    Unbind
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
+                          labs.map((lab) => {
+                            const dep = deployments.find((d) => d.lab_id === lab.id);
+                            return (
+                              <TableRow key={lab.id}>
+                                <TableCell className="font-medium">{lab.name}</TableCell>
+                                <TableCell>
+                                  {dep ? (
+                                    <span>
+                                      {dep.board_label}
+                                      <span className="text-muted-foreground"> :{dep.port}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">static address</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {dep ? <Badge variant="success">yes</Badge> : <Badge variant="outline">no</Badge>}
+                                </TableCell>
+                                <TableCell>
+                                  {!dep ? (
+                                    <span className="text-xs text-muted-foreground">works, not health-gated</span>
+                                  ) : dep.available ? (
+                                    <div className="flex flex-col gap-0.5">
+                                      <Badge variant="success" className="w-fit">serving</Badge>
+                                      <span className="font-mono text-[10px] text-muted-foreground">{dep.backend_url}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col gap-0.5">
+                                      <Badge variant="destructive" className="w-fit">withdrawn</Badge>
+                                      <span className="text-xs text-muted-foreground">{dep.reason}</span>
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  {dep ? (
+                                    <div className="flex justify-end gap-2">
+                                      <Button size="sm" variant="secondary" disabled={busy === `dep-${dep.id}`} onClick={() => handleToggleDeployment(dep)}>
+                                        {dep.is_enabled ? "Pause" : "Resume"}
+                                      </Button>
+                                      <Button size="sm" variant="destructive" disabled={busy === `dep-${dep.id}`} onClick={() => handleUnbind(dep)}>
+                                        Unbind
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">bind below to monitor</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
                         )}
                       </TableBody>
                     </Table>
@@ -983,8 +1052,43 @@ export default function FleetPage() {
         </div>
       </div>
 
-      <ClaimBoardDialog device={claiming} captureOptions={captureDevices} onClose={() => setClaiming(null)} onDone={refresh} />
+      <ClaimBoardDialog
+        device={claiming}
+        captureOptions={captureDevices}
+        gpioOptions={discoveredGpio}
+        hasScan={scan !== null}
+        scanning={scanning}
+        onScan={handleScan}
+        onClose={() => setClaiming(null)}
+        onDone={refresh}
+      />
       <TokenDialog issued={issuedToken} onClose={() => setIssuedToken(null)} />
+      <PickerDialog
+        open={gpioBoard !== null}
+        title={gpioBoard ? `GPIO controller for ${gpioBoard.label}` : ""}
+        description="The Raspberry Pi that drives this board's switches. Pick one Discovery found, or type an address — the network is checked before it is saved, so a Pi that isn't there is refused."
+        options={discoveredGpio}
+        current={gpioBoard?.gpio_endpoint ?? ""}
+        manualPlaceholder="10.30.70.50:20000"
+        hasScan={scan !== null}
+        scanning={scanning}
+        onScan={handleScan}
+        onClose={() => setGpioBoard(null)}
+        onSave={(v) => gpioBoard && saveGpio(gpioBoard, v)}
+      />
+      <PickerDialog
+        open={addressShuttle !== null}
+        title={addressShuttle ? `Address for ${addressShuttle.name}` : ""}
+        description="Where this shuttle's lab containers are reached — student browsers are sent here. Pick a host Discovery found, or type one."
+        options={discoveredAddresses}
+        current={addressShuttle?.address ?? ""}
+        manualPlaceholder="10.30.70.23"
+        hasScan={scan !== null}
+        scanning={scanning}
+        onScan={handleScan}
+        onClose={() => setAddressShuttle(null)}
+        onSave={(v) => addressShuttle && saveAddress(addressShuttle, v)}
+      />
     </div>
   );
 }
@@ -1023,6 +1127,78 @@ function KindBadge({ kind }: { kind: string }) {
   if (kind === "raspberry_pi") return <Badge variant="success">Raspberry Pi</Badge>;
   if (kind === "proxmox") return <Badge variant="secondary">Proxmox</Badge>;
   return <Badge variant="outline">Host</Badge>;
+}
+
+/** A pick-from-the-network-or-type dialog. The options come from the
+ *  last discovery scan, so an admin binds a Pi or a shuttle address to
+ *  something that is actually on the network, not a remembered guess. */
+function PickerDialog({
+  open,
+  title,
+  description,
+  options,
+  current,
+  manualPlaceholder,
+  hasScan,
+  scanning,
+  onScan,
+  onSave,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  options: { value: string; label: string; note?: string }[];
+  current: string;
+  manualPlaceholder: string;
+  hasScan: boolean;
+  scanning: boolean;
+  onScan: () => void;
+  onSave: (value: string) => void;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(current);
+  useEffect(() => {
+    setValue(current);
+  }, [current, open]);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        <div className="mt-4 space-y-2">
+          {options.length > 0 ? (
+            <select
+              value=""
+              onChange={(e) => e.target.value && setValue(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <option value="">Choose from the network…</option>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                  {o.note ? ` — ${o.note}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Button type="button" size="sm" variant="secondary" disabled={scanning} onClick={onScan}>
+              {scanning ? "Scanning…" : hasScan ? "Nothing found — scan again" : "Scan network"}
+            </Button>
+          )}
+          <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={manualPlaceholder} />
+          <p className="text-xs text-muted-foreground">Leave blank to clear.</p>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => onSave(value)}>Save</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /** Shown once, and only once — the server keeps a hash, so this value
@@ -1067,11 +1243,19 @@ function TokenDialog({
 function ClaimBoardDialog({
   device,
   captureOptions,
+  gpioOptions,
+  hasScan,
+  scanning,
+  onScan,
   onClose,
   onDone,
 }: {
   device: UnclaimedDevice | null;
   captureOptions: Device[];
+  gpioOptions: { value: string; label: string; note?: string }[];
+  hasScan: boolean;
+  scanning: boolean;
+  onScan: () => void;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
@@ -1181,9 +1365,32 @@ function ClaimBoardDialog({
 
               <div>
                 <Label htmlFor="board-gpio">GPIO controller (optional)</Label>
-                <Input id="board-gpio" value={gpio} onChange={(e) => setGpio(e.target.value)} placeholder="10.30.70.50:20000" />
+                {gpioOptions.length > 0 ? (
+                  <select
+                    id="board-gpio-pick"
+                    value=""
+                    onChange={(e) => e.target.value && setGpio(e.target.value)}
+                    className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+                  >
+                    <option value="">Choose a Pi Discovery found…</option>
+                    {gpioOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                        {o.note ? ` — ${o.note}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="mt-1">
+                    <Button type="button" size="sm" variant="secondary" disabled={scanning} onClick={onScan}>
+                      {scanning ? "Scanning…" : hasScan ? "No Pi found — scan again" : "Scan network for Pis"}
+                    </Button>
+                  </div>
+                )}
+                <Input id="board-gpio" className="mt-2" value={gpio} onChange={(e) => setGpio(e.target.value)} placeholder="10.30.70.50:20000" />
                 <p className="mt-1 text-xs text-muted-foreground">
-                  The Raspberry Pi driving this board's switches, if it has one. Discovery can find its address.
+                  The Raspberry Pi driving this board's switches, if it has one. The address is checked against the network
+                  before the board is saved.
                 </p>
               </div>
             </div>
