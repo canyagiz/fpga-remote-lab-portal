@@ -242,18 +242,20 @@ def test_access_is_refused_even_with_a_direct_link(client):
     assert "temporarily unavailable" in response.json()["detail"]
 
 
-def test_a_capture_card_rejection_does_not_start_the_session_countdown(client):
-    """Regression test for a real incident: a student's reservation went
-    active (access-now), the board's capture card turned out to be
-    unplugged (deployment health rejects /access with a 503 - "This lab
-    is temporarily unavailable: ... capture card ... is not attached to
-    this shuttle"), and the reservation kept counting down a session the
-    student was never let into - a second attempt after the card was
-    reconnected would find less and less time left, or none at all.
+def test_access_now_refuses_to_create_a_reservation_for_an_unhealthy_board(client):
+    """Regression test for a real incident: access-now doesn't check
+    deployment health at all, so clicking Access on a lab whose capture
+    card is unplugged still created (or promoted) an active reservation -
+    one that /labs/{id}/access would then immediately refuse with 503
+    ("This lab is temporarily unavailable: ... capture card ... is not
+    attached to this shuttle"). The student was left staring at that
+    error banner while the dashboard showed a live "Active" reservation
+    they could never actually open - a dead end they had to notice and
+    Cancel themselves.
 
-    session_ends_at must stay null through the rejection (usage_start_time,
-    which anchors the calendar slot, is unaffected and still set), and
-    only start once /access actually succeeds.
+    access-now must refuse with the same 503 *before* creating or
+    promoting anything, so an unhealthy board never produces a
+    reservation at all.
     """
     _admin(client)
     # Board bound, but no capture card reported at all - reproduces
@@ -263,27 +265,25 @@ def test_a_capture_card_rejection_does_not_start_the_session_countdown(client):
     _deploy(client, lab_id, _template(client), _board(client))
 
     _student(client)
-    client.post("/api/reservations/access-now", json={"lab_id": lab_id})
-
-    rejected = client.get(f"/api/labs/{lab_id}/access")
+    rejected = client.post("/api/reservations/access-now", json={"lab_id": lab_id})
     assert rejected.status_code == 503
     assert "capture card" in rejected.json()["detail"]
     assert "not attached to this shuttle" in rejected.json()["detail"]
 
-    mine = client.get("/api/reservations/mine").json()
-    reservation = next(r for r in mine if r["lab_id"] == lab_id)
-    assert reservation["status"] == "active"
-    assert reservation["usage_start_time"] is not None
-    assert reservation["session_ends_at"] is None
+    # No reservation was left behind for the rejected attempt.
+    assert client.get("/api/reservations/mine").json() == []
 
-    # Card gets plugged back in - a retry now succeeds and only then
-    # starts the countdown, fresh, rather than resuming one already
-    # burned by the earlier rejection.
+    # Card gets plugged back in - access-now (and then /access) now both
+    # succeed normally, with a fresh, full-length countdown.
     client.post(
         "/api/inventory/report",
         json=_report([BLASTER, MAGEWELL]),
         headers={"Authorization": f"Bearer {token}"},
     )
+    granted = client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+    assert granted.status_code == 201
+    assert granted.json()["status"] == "active"
+
     with patch(
         "app.routers.labs.start_weblab_session",
         return_value="http://10.30.70.23:5001/foo/callback/fake-session-id",
@@ -294,6 +294,57 @@ def test_a_capture_card_rejection_does_not_start_the_session_countdown(client):
     mine = client.get("/api/reservations/mine").json()
     reservation = next(r for r in mine if r["lab_id"] == lab_id)
     assert reservation["session_ends_at"] is not None
+
+
+def test_access_now_refuses_to_promote_a_scheduled_reservation_on_an_unhealthy_board(client):
+    """Same guarantee as above, for the other path through access-now: a
+    scheduled reservation whose time has arrived must not be promoted to
+    active while the board is unhealthy either - it stays pending (so the
+    student can keep retrying within the access grace period) instead of
+    becoming a dead "Active" entry.
+    """
+    from datetime import datetime, timedelta
+
+    from app.database import SessionLocal
+    from app.models import Reservation, ReservationStatus, User
+
+    _admin(client)
+    _, token = _fleet(client, devices=[BLASTER])
+    lab_id = _lab_id(client)
+    _deploy(client, lab_id, _template(client), _board(client))
+
+    _student(client)
+    slot = datetime.utcnow() + timedelta(minutes=10)
+    scheduled = client.post(
+        "/api/reservations",
+        json={
+            "lab_id": lab_id,
+            "reservation_date": slot.date().isoformat(),
+            "reservation_time": slot.time().replace(microsecond=0).isoformat(),
+        },
+    ).json()
+
+    # Move the slot onto "now" directly (make_reservation enforces a
+    # minimum advance notice, so it can't be booked to start immediately
+    # through the API - see test_reservations.py for that rule's own
+    # coverage).
+    db = SessionLocal()
+    try:
+        row = db.get(Reservation, scheduled["id"])
+        now = datetime.utcnow()
+        row.reservation_date = now.date()
+        row.reservation_time = now.time()
+        db.commit()
+    finally:
+        db.close()
+
+    rejected = client.post("/api/reservations/access-now", json={"lab_id": lab_id})
+    assert rejected.status_code == 503
+    assert "not attached to this shuttle" in rejected.json()["detail"]
+
+    mine = client.get("/api/reservations/mine").json()
+    reservation = next(r for r in mine if r["lab_id"] == lab_id)
+    assert reservation["status"] == "pending"
 
 
 def test_an_admin_can_take_a_lab_out_of_service_without_unbinding_it(client):

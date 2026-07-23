@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Reservation, ReservationStatus, User
+from app.models import Lab, Reservation, ReservationStatus, User
 from app.schemas import CalendarEntryOut, JoinQueueRequest, ReservationCreate, ReservationOut
 from app.services.availability import (
     ACCESS_GRACE_PERIOD as _ACCESS_GRACE_PERIOD,
@@ -222,6 +222,24 @@ def access_now(payload: JoinQueueRequest, db: Session = Depends(get_db), user: U
     )
     if active_own is not None:
         return _to_out(active_own)
+
+    # Refuse to hand out or promote a reservation to active when the
+    # board itself is not currently fit to serve - a reservation that can
+    # never be opened isn't "active", it's a dead end the user has to
+    # notice and cancel themselves. Checked before *any* state change
+    # below (both promoting a scheduled reservation and creating a fresh
+    # one), using the same health check /labs/{id}/access enforces, so
+    # the same "This lab is temporarily unavailable: ..." reason a
+    # student would otherwise only see after already being marked active.
+    lab = db.get(Lab, payload.lab_id)
+    if lab is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
+    resolved = deployments.resolve(db, lab)
+    if resolved is not None and not resolved.available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"This lab is temporarily unavailable: {resolved.reason}",
+        )
 
     own_scheduled = db.scalars(
         select(Reservation).where(

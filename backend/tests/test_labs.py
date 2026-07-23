@@ -212,11 +212,12 @@ def test_failed_hardware_start_does_not_start_the_session_clock(client):
     which access-now sets the instant a reservation is promoted to active -
     before the hardware session is ever attempted. A hardware failure on
     the first /access call then left the reservation "active" with a
-    countdown already ticking, even though the user was never let in. See
-    test_fleet_deployments.py::test_a_capture_card_rejection_does_not_start_the_session_countdown
-    for the same fix exercised through a real deployment-health rejection
-    (the 503 path); this test covers the plain start_weblab_session
-    failure (502) path instead.
+    countdown already ticking, even though the user was never let in. This
+    test covers the plain start_weblab_session failure (502) path - a
+    board access-now itself has no way to know is unhealthy up front. See
+    test_fleet_deployments.py::test_access_now_refuses_to_create_a_reservation_for_an_unhealthy_board
+    for the (more common) case where the board's health is already known
+    at access-now time: there, no reservation is created at all.
     """
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")

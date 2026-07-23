@@ -434,9 +434,12 @@ def test_access_now_marks_active_without_starting_the_session_countdown(client):
     shows and disables Finish/Cancel against - must stay unset until the
     hardware session actually opens via GET /labs/{id}/access. Otherwise a
     hardware failure on that call (see
-    test_labs.py::test_failed_hardware_start_does_not_start_the_session_clock,
-    test_fleet_deployments.py::test_a_capture_card_rejection_does_not_start_the_session_countdown)
-    would burn session time the user never got to use.
+    test_labs.py::test_failed_hardware_start_does_not_start_the_session_clock)
+    would burn session time the user never got to use. A board that is
+    already known to be unhealthy at access-now time is a separate, harder
+    guarantee - see
+    test_fleet_deployments.py::test_access_now_refuses_to_create_a_reservation_for_an_unhealthy_board,
+    which never lets the reservation exist in the first place.
     """
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")
