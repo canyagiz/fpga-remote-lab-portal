@@ -274,13 +274,17 @@ def test_an_unexpected_idcode_is_flagged_rather_than_reinterpreted(client):
     assert "hardware may have changed" in fpga["message"]
 
 
-def test_the_same_lab_is_compared_against_every_shuttle(client):
-    """The question is not "does this work" but "where does this work"."""
+def test_the_same_lab_is_compared_against_every_shuttle_that_has_the_board(client):
+    """The question is not "does this work" but "where does this work" -
+    asked only of shuttles that actually have the board in question. A
+    shuttle with none of it at all is not a gap (see
+    test_a_template_for_an_absent_board_is_not_asked_of_shuttles_without_it) -
+    it just is not asked."""
     _admin(client)
     _, a_token = _enrol(client, "Shuttle A")
     _, b_token = _enrol(client, "Shuttle B")
-    # A has the board but no capture card; B has both.
-    _post(client, a_token, _report([BLASTER]))
+    # Both have the Arty board's programmer; only B also has its capture card.
+    _post(client, a_token, _report([BLASTER, FTDI]))
     _post(client, b_token, _report([FTDI, MAGEWELL], _signal("D206240701386", True)))
     _register_board(client)
     _register_board(
@@ -433,10 +437,15 @@ def test_a_board_can_be_revised_after_registration(client):
     assert bad.status_code == 400
 
 
-def test_a_template_for_an_absent_board_does_not_borrow_another_boards_hardware(client):
+def test_a_template_for_an_absent_board_is_not_asked_of_shuttles_without_it(client):
     """The worst version of this bug: a lab whose board is not even here
     reporting that its capture card has a signal, because some other
-    board's card was on the same shuttle."""
+    board's card was on the same shuttle. Excluding the shuttle from the
+    fleet-wide view entirely - not asking the question at all - is a
+    stronger guarantee against that than reporting "missing" would be,
+    and it is also what keeps a template that nothing has committed to
+    deploying yet from showing up as a fleet-wide warning the moment it
+    is defined."""
     _admin(client)
     _, token = _enrol(client)
     _post(client, token, _report([BLASTER, MAGEWELL], _signal("D206240701386", True)))
@@ -451,14 +460,8 @@ def test_a_template_for_an_absent_board_does_not_borrow_another_boards_hardware(
             {"type": "gpio"},
         ],
     )
-    results = {
-        r["type"]: r
-        for r in client.get(f"/api/admin/fleet/templates/{absent}/gaps").json()[0]["results"]
-    }
-    assert results["fpga"]["status"] == "missing"
-    assert results["video_capture"]["status"] == "missing"
-    assert results["gpio"]["status"] == "missing"
-    assert "cyclone_v" in results["video_capture"]["message"]
+    reports = client.get(f"/api/admin/fleet/templates/{absent}/gaps").json()
+    assert reports == []
 
 
 def test_gpio_names_the_board_s_own_controller(client):

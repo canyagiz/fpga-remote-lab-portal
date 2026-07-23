@@ -162,9 +162,30 @@ def evaluate(template: LabTemplate, inventory: ShuttleInventory) -> GapReport:
 
 
 def evaluate_across_fleet(db: Session, template: LabTemplate) -> list[GapReport]:
-    """Where can this lab run, and what is stopping it elsewhere?"""
-    shuttles = db.scalars(select(Shuttle).order_by(Shuttle.id)).all()
-    return [evaluate(template, build_inventory(db, s)) for s in shuttles]
+    """Where can this lab run, and what is stopping it there?
+
+    Only asked of shuttles that actually hold a board of the family this
+    template names. A shuttle with no such board is not a configuration
+    gap anyone here can close - there is no admin action that attaches a
+    board that does not exist - so evaluating it would only report the
+    same "no board of this family" finding on every shuttle in the
+    fleet, for every template defined, whether or not it was ever meant
+    to run anywhere yet. Creating a template describes a possible lab;
+    it does not commit any shuttle to providing one, and the fleet-wide
+    view should only ever surface gaps a shuttle admin can actually act
+    on. A template naming no family at all is a whole-shuttle question
+    and is still asked everywhere.
+    """
+    parsed = req.parse(template.requirements or [])
+    family = next((r.family for r in parsed if isinstance(r, req.FpgaRequirement)), None)
+
+    reports = []
+    for shuttle in db.scalars(select(Shuttle).order_by(Shuttle.id)):
+        inventory = build_inventory(db, shuttle)
+        if family is not None and inventory.find_board(family=family) is None:
+            continue
+        reports.append(evaluate(template, inventory))
+    return reports
 
 
 def unused_devices(db: Session) -> list[Device]:
