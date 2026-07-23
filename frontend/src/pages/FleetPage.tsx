@@ -879,12 +879,10 @@ export default function FleetPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="mb-3 text-sm text-muted-foreground">
-                    Every lab is served one of two ways. <strong className="font-semibold text-foreground">Static</strong> —
-                    the fixed address from <code className="font-mono text-xs">labs.yaml</code>; it works (which is why
-                    Cyclone IV and Arty are reachable now), but nothing checks the hardware, so a broken board is only
-                    found by a student. <strong className="font-semibold text-foreground">Bound to a board</strong> — the
-                    address is resolved from wherever the board actually is, and the lab is continuously health-checked,
-                    withdrawn automatically the moment its hardware fails. Binding is what turns monitoring on.
+                    A lab is served only when it is <strong className="font-semibold text-foreground">bound to a board</strong>
+                    whose hardware is currently fit: the address is resolved from wherever the board actually is, and the
+                    lab is withdrawn automatically the moment its hardware fails. An <strong className="font-semibold text-foreground">unbound</strong>
+                    lab is not offered to students at all. Bind a lab below to serve it.
                   </p>
                   <div className="overflow-x-auto">
                     <Table>
@@ -892,7 +890,7 @@ export default function FleetPage() {
                         <TableRow>
                           <TableHead>Lab</TableHead>
                           <TableHead>Serving from</TableHead>
-                          <TableHead>Monitored</TableHead>
+                          <TableHead>Served</TableHead>
                           <TableHead>State</TableHead>
                           <TableHead />
                         </TableRow>
@@ -917,11 +915,17 @@ export default function FleetPage() {
                                   )}
                                 </TableCell>
                                 <TableCell>
-                                  {dep ? <Badge variant="success">yes</Badge> : <Badge variant="outline">no</Badge>}
+                                  {dep && dep.available ? (
+                                    <Badge variant="success">yes</Badge>
+                                  ) : dep ? (
+                                    <Badge variant="destructive">withdrawn</Badge>
+                                  ) : (
+                                    <Badge variant="outline">no</Badge>
+                                  )}
                                 </TableCell>
                                 <TableCell>
                                   {!dep ? (
-                                    <span className="text-xs text-muted-foreground">works, not health-gated</span>
+                                    <span className="text-xs" style={{ color: "var(--warning)" }}>not served — bind a board</span>
                                   ) : dep.available ? (
                                     <div className="flex flex-col gap-0.5">
                                       <Badge variant="success" className="w-fit">serving</Badge>

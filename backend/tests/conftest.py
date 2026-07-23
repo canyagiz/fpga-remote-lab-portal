@@ -17,6 +17,9 @@ os.environ["VERIFY_EMAIL_DELIVERABILITY"] = "false"
 # Board GPIO endpoints in tests point at real lab addresses that are not
 # reachable from the test host - skip the reachability gate here.
 os.environ["VERIFY_ENDPOINT_REACHABILITY"] = "false"
+# Most tests access labs without binding a deployment; keep the static
+# fallback here and cover the strict policy explicitly where it matters.
+os.environ["REQUIRE_DEPLOYMENT_FOR_ACCESS"] = "false"
 # Deterministic root-admin allowlist for the tests, so they don't depend on
 # the real Andrea/Yagiz addresses baked into config.py's defaults. Anyone
 # registering with root@example.com is auto-promoted (see

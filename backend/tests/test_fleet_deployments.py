@@ -276,3 +276,53 @@ def test_deployment_management_is_admin_only(client):
         ).status_code
         == 403
     )
+
+
+# ---- strict policy: only bound + healthy labs are served ----------------
+#
+# conftest keeps require_deployment_for_access off for the suite at large
+# (most tests access labs without binding). These turn it on explicitly to
+# cover the option where an unbound lab is not offered at all.
+
+def test_strict_policy_hides_unbound_labs_from_students(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "require_deployment_for_access", True)
+    _admin(client)
+
+    # Nothing bound yet: an admin still sees the catalogue, a student sees
+    # none of it.
+    admin_labs = client.get("/api/labs").json()
+    assert len(admin_labs) == 4
+    assert all(lab["deployment_status"] == "unavailable" for lab in admin_labs)
+
+    _student(client)
+    assert client.get("/api/labs").json() == []
+
+
+def test_strict_policy_serves_a_bound_healthy_lab_only(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "require_deployment_for_access", True)
+    _admin(client)
+    _fleet(client, signal=True)
+    lab_id = _lab_id(client)
+    _deploy(client, lab_id, _template(client), _board(client))
+
+    # The bound lab is served; the other three, unbound, are not.
+    _student(client)
+    visible = {lab["id"] for lab in client.get("/api/labs").json()}
+    assert visible == {lab_id}
+
+
+def test_strict_policy_refuses_access_to_an_unbound_lab(client, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "require_deployment_for_access", True)
+    register(client, "root", "root@example.com")
+    login(client, "root")
+    # Any lab that has no deployment - access must be refused even with a
+    # direct link, not just hidden from the list.
+    some_lab = client.get("/api/labs").json()[0]["id"]
+    response = client.get(f"/api/labs/{some_lab}/access")
+    assert response.status_code in (403, 503)

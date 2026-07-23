@@ -1,10 +1,12 @@
 """Where a lab actually lives right now, and whether it should be offered.
 
-Everything here is opt-in per lab. `resolve` returns None for a lab with
-no deployment, and every caller falls back to the behaviour that was
-already there - the static backend_url from labs.yaml. That is what lets
-this ship in front of a running teaching lab without changing anything
-until an admin deliberately binds a lab to a board.
+Whether a lab is served, and from where, is decided here.
+
+With `require_deployment_for_access` on (the default), a lab is served
+only when it is bound to a board and that board's hardware is currently
+fit - an unbound lab is not offered at all. With it off, a lab without a
+deployment falls back to the static backend_url from labs.yaml, which is
+how this first shipped in front of a running lab without changing it.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Board, Device, Lab, LabDeployment, Shuttle
 from app.services import matching
 
@@ -27,7 +30,7 @@ class Resolved:
     student into a lab that is not there.
     """
 
-    deployment: LabDeployment
+    deployment: LabDeployment | None
     shuttle: Shuttle | None
     backend_url: str | None
     available: bool
@@ -57,6 +60,11 @@ def resolve(db: Session, lab: Lab) -> Resolved | None:
     """Current state of this lab's deployment, or None if it has none."""
     deployment = db.scalar(select(LabDeployment).where(LabDeployment.lab_id == lab.id))
     if deployment is None:
+        # No board bound. Under the default policy that means the lab is
+        # not served at all - the static fallback only applies when
+        # require_deployment_for_access is turned off.
+        if settings.require_deployment_for_access:
+            return Resolved(None, None, None, False, "Not bound to a board yet")
         return None
 
     if not deployment.is_enabled:

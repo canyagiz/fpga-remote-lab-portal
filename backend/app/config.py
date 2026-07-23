@@ -88,5 +88,10 @@ class Settings(BaseSettings):
     # fail later. Off in tests, which have no such network.
     verify_endpoint_reachability: bool = True
 
+    # A lab is served only when bound to a board whose hardware is
+    # currently fit. With this off, an unbound lab falls back to its
+    # static labs.yaml address (the original additive behaviour).
+    require_deployment_for_access: bool = True
+
 
 settings = Settings()
