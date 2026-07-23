@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +76,8 @@ function EmptyRow({ colSpan, children }: { colSpan: number; children: React.Reac
 
 type Section = "overview" | "shuttles" | "boards" | "labs" | "deployments" | "discovery";
 
+const SECTIONS: Section[] = ["overview", "shuttles", "boards", "labs", "deployments", "discovery"];
+
 export default function FleetPage() {
   const { showError, showSuccess } = useToast();
 
@@ -90,7 +92,20 @@ export default function FleetPage() {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const [section, setSection] = useState<Section>("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const section: Section = (SECTIONS as string[]).includes(sectionParam ?? "")
+    ? (sectionParam as Section)
+    : "overview";
+  const setSection = (next: Section) =>
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        params.set("section", next);
+        return params;
+      },
+      { replace: true },
+    );
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
@@ -359,7 +374,21 @@ export default function FleetPage() {
   );
   shuttles.filter((s) => s.status === "offline").forEach((s) => attention.push({ text: `${s.name} has stopped reporting`, section: "shuttles" }));
   shuttles.filter((s) => !s.address).forEach((s) => attention.push({ text: `${s.name} has no address set`, section: "shuttles" }));
-  boards.filter((b) => !b.video_capture_serial).forEach((b) => attention.push({ text: `${b.label} has no capture card recorded`, section: "boards" }));
+  // Only the families whose own templates actually ask for a capture
+  // card - a board whose family never needs one (Arty Z7's template has
+  // no video_capture requirement at all) is not missing anything by
+  // lacking a serial here, and flagging it anyway is exactly the "the
+  // template exists, so it must be filled" assumption this list should
+  // not make.
+  const familiesNeedingCapture = new Set(
+    templates
+      .filter((t) => t.requirements.some((r) => r.type === "video_capture"))
+      .map((t) => fpgaFamilyOf(t.requirements))
+      .filter((f): f is string => f !== null),
+  );
+  boards
+    .filter((b) => familiesNeedingCapture.has(b.family) && !b.video_capture_serial)
+    .forEach((b) => attention.push({ text: `${b.label} has no capture card recorded`, section: "boards" }));
   blockedGaps.forEach((g) =>
     attention.push({ text: `${g.template_name} on ${g.shuttle_name}: ${g.missing_count} unmet requirement${g.missing_count === 1 ? "" : "s"}`, section: "labs" }),
   );
@@ -384,14 +413,14 @@ export default function FleetPage() {
             {boards.length} board{boards.length === 1 ? "" : "s"} · {readyLabs}/{gaps.length || 0} labs ready
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-3 text-sm">
           <span className="text-xs text-muted-foreground">updated {formatWhen(lastRefresh)}</span>
-          <button onClick={refresh} className="font-medium text-muted-foreground hover:text-foreground">
+          <Button variant="outline" size="sm" onClick={refresh}>
             Refresh
-          </button>
-          <Link to="/admin/fleet/graph" className="font-medium text-muted-foreground hover:text-foreground">
-            Topology view →
-          </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/admin/fleet/graph">Topology view →</Link>
+          </Button>
         </div>
       </div>
 
@@ -778,8 +807,9 @@ export default function FleetPage() {
                 </CardHeader>
                 <CardContent>
                   <p className="mb-3 text-sm text-muted-foreground">
-                    A template states what a lab needs, once. The system keeps comparing it against every shuttle —
-                    nothing here installs or configures anything, it only describes.
+                    A template states what a lab needs, once — creating one describes a possible lab, it does not
+                    commit any shuttle to providing it. Below, the system compares it only against shuttles that
+                    actually have the board it names; one with no such board yet has nothing to report.
                   </p>
                   <div className="overflow-x-auto">
                     <Table>
@@ -1541,6 +1571,13 @@ function DeploymentForm({
 
 /** Human-readable summary of one stored requirement. Exhaustive with a
  *  `never` fallthrough. */
+function fpgaFamilyOf(reqs: LabRequirement[]): string | null {
+  for (const r of reqs) {
+    if (r.type === "fpga") return r.family;
+  }
+  return null;
+}
+
 function describeRequirement(req: LabRequirement): { label: string; detail: string } {
   switch (req.type) {
     case "fpga":
