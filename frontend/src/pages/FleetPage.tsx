@@ -117,8 +117,10 @@ export default function FleetPage() {
   const [addressShuttle, setAddressShuttle] = useState<Shuttle | null>(null);
   const [provTarget, setProvTarget] = useState<Shuttle | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   async function refresh() {
+    setRefreshing(true);
     try {
       const [s, d, u, b, t, g, dep, un, l] = await Promise.all([
         api.getShuttles(),
@@ -143,6 +145,8 @@ export default function FleetPage() {
       setLastRefresh(new Date().toISOString());
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Failed to load fleet data");
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -415,8 +419,8 @@ export default function FleetPage() {
         </div>
         <div className="flex items-center gap-3 text-sm">
           <span className="text-xs text-muted-foreground">updated {formatWhen(lastRefresh)}</span>
-          <Button variant="outline" size="sm" onClick={refresh}>
-            Refresh
+          <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/admin/fleet/graph">Topology view →</Link>
@@ -1801,6 +1805,9 @@ function ProvisionWizard({
   const [artyUsbBus, setArtyUsbBus] = useState("/dev/bus/usb");
   const [uart, setUart] = useState<Record<string, { host: string; port: string }>>({});
   const [quartusPath, setQuartusPath] = useState("");
+  const [installerMode, setInstallerMode] = useState<"upload" | "path">("upload");
+  const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
 
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<ProvisionJobStatus | null>(null);
@@ -1819,6 +1826,9 @@ function ProvisionWizard({
     setJobId(null);
     setStatus(null);
     setStarting(false);
+    setInstallerMode("upload");
+    setUploading(false);
+    setUploadPct(0);
   }, [shuttle]);
 
   const needsQuartus = boards.some((b) => PROV_BOARDS.find((x) => x.value === b)?.intel);
@@ -1859,6 +1869,26 @@ function ProvisionWizard({
       const current = prev[board] ?? { host: "", port: "20000" };
       return { ...prev, [board]: { ...current, [field]: value } };
     });
+  }
+
+  async function handleInstallerPick(f: File | null) {
+    if (!f || !shuttle) return;
+    setUploading(true);
+    setUploadPct(0);
+    setQuartusPath("");
+    try {
+      const res = await api.uploadInstaller(
+        shuttle.id,
+        { ssh_user: sshUser.trim(), ssh_password: sshPassword, ssh_host: sshHost.trim() || null },
+        f,
+        (p) => setUploadPct(p),
+      );
+      setQuartusPath(res.path);
+    } catch (err) {
+      showError(err instanceof api.ApiError ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function start() {
@@ -2004,12 +2034,47 @@ function ProvisionWizard({
                       <LabeledInput label="video0" value={video0} onChange={setVideo0} />
                       <LabeledInput label="video1" value={video1} onChange={setVideo1} />
                     </div>
-                    <div>
-                      <Label htmlFor="prov-quartus">Quartus installer path (on the shuttle)</Label>
-                      <Input id="prov-quartus" value={quartusPath} onChange={(e) => setQuartusPath(e.target.value)} placeholder="/root/QuartusProgrammerSetup-25.1std.run" />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Intel gates the download behind an account, so it cannot be fetched automatically — place your
-                        licensed installer on the machine and give its path here.
+                    <div className="space-y-2">
+                      <Label>Quartus installer</Label>
+                      <div className="flex gap-4 text-xs">
+                        <label className="flex items-center gap-1">
+                          <input type="radio" checked={installerMode === "upload"} onChange={() => setInstallerMode("upload")} />
+                          Upload from this computer
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <input type="radio" checked={installerMode === "path"} onChange={() => setInstallerMode("path")} />
+                          Already on the shuttle
+                        </label>
+                      </div>
+                      {installerMode === "upload" ? (
+                        <div className="space-y-1">
+                          <input
+                            type="file"
+                            accept=".run"
+                            disabled={uploading || !sshPassword}
+                            onChange={(e) => handleInstallerPick(e.target.files?.[0] ?? null)}
+                            className="block w-full text-xs file:mr-3 file:rounded-md file:border file:bg-muted file:px-3 file:py-1 file:text-xs"
+                          />
+                          {!sshPassword && (
+                            <p className="text-xs text-warning-muted-foreground">Enter the SSH password in step 1 first.</p>
+                          )}
+                          {uploading && (
+                            <p className="text-xs text-muted-foreground">
+                              {uploadPct < 100 ? `Uploading to the portal… ${uploadPct}%` : "Transferring to the shuttle…"}
+                            </p>
+                          )}
+                          {quartusPath && !uploading && (
+                            <p className="text-xs text-muted-foreground">
+                              ✓ On the shuttle at <code className="font-mono">{quartusPath}</code>
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <Input value={quartusPath} onChange={(e) => setQuartusPath(e.target.value)} placeholder="/root/QuartusProgrammerSetup-25.1std.run" />
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Intel gates the download behind an account — either upload your licensed installer from your
+                        machine, or place it on the shuttle and give its path.
                       </p>
                     </div>
                   </div>
