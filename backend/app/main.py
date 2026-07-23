@@ -21,6 +21,7 @@ from app.routers import (
     inventory,
     labs,
     profile,
+    provisioning,
     reservations,
     stats,
 )
@@ -163,6 +164,7 @@ app.include_router(stats.router, prefix="/api")
 # dependency by accident.
 app.include_router(inventory.router, prefix="/api")
 app.include_router(inventory.admin_router, prefix="/api")
+app.include_router(provisioning.router, prefix="/api")
 
 # Not under /api: nginx now reverse-proxies /hw/{lab_id}/* and
 # /labfiles/* straight to CT300 itself (see

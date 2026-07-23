@@ -665,3 +665,42 @@ class ScanResultOut(BaseModel):
     subnet: str
     duration_ms: int
     hosts: list[DiscoveredHostOut]
+
+
+# ---- Provisioning (setup wizard) -------------------------------------
+
+
+class ProvisionRequest(BaseModel):
+    # SSH credentials for first contact with the shuttle's Proxmox host.
+    # Used only to run the playbook, then discarded - never stored.
+    ssh_user: str = Field(min_length=1, max_length=64)
+    ssh_password: str = Field(min_length=1, max_length=256)
+    # Where to reach it over SSH; defaults to the shuttle's address.
+    ssh_host: str | None = Field(default=None, max_length=255)
+    # The wizard's "detected devices" step: which boards are attached and
+    # how this shuttle's hardware is wired.
+    boards: list[str] = Field(default_factory=list)
+    device_map: dict[str, str] = Field(default_factory=dict)
+    board_uart: dict[str, dict] = Field(default_factory=dict)
+    # Intel boards only: path on the shuttle to the licensed installer.
+    quartus_installer_path: str = Field(default="", max_length=512)
+
+
+class ProvisionJobStarted(BaseModel):
+    success: bool = True
+    job_id: str
+    shuttle_id: int
+    status: str
+
+
+class ProvisionJobStatus(BaseModel):
+    job_id: str
+    shuttle_id: int
+    # pending | running | succeeded | failed
+    status: str
+    returncode: int | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    # The whole log so far; the client remembers how many lines it has
+    # already rendered and appends only the rest.
+    log: list[str]

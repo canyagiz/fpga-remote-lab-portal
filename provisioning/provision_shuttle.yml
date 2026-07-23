@@ -165,6 +165,9 @@
         - { src: "agent.conf.j2", dest: "agent.conf", mode: "0600" }
         - { src: "agent.env.j2", dest: "agent.env", mode: "0600" }
         - { src: "configure-agent.sh.j2", dest: "configure-agent.sh", mode: "0700" }
+      # The agent.env item renders the token; hide this task's detail so it
+      # can never surface in a -vvv run or the wizard's streamed log.
+      no_log: true
 
     - name: Push agent files into the agent container
       ansible.builtin.command: "pct push {{ agent_ctid }} {{ stage_dir }}/{{ item }} /root/{{ item }}"
