@@ -623,6 +623,8 @@ def _deployment_out(db: Session, deployment: LabDeployment) -> DeploymentOut:
         backend_url=resolved.backend_url if resolved else None,
         available=bool(resolved and resolved.available),
         reason=resolved.reason if resolved else None,
+        last_access_error=deployment.last_access_error,
+        last_access_error_at=deployment.last_access_error_at,
     )
 
 

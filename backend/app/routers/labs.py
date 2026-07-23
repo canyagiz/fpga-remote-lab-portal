@@ -147,12 +147,37 @@ def access_lab(
                 backend_url=resolved.backend_url if resolved else None,
             )
         except (httpx.HTTPError, WeblabSessionError) as err:
+            # This reservation never opened a session (weblab_session_url
+            # is still None, or this branch would not have run) - it is
+            # exactly the "dead end" access-now already refuses to create
+            # when the health check fails up front. The health check
+            # cannot predict every failure, though - reachable-and-present
+            # hardware can still fail to actually initialize - so the same
+            # rule is enforced here too: a reservation that never got in
+            # is cancelled rather than left "active" for the user to
+            # notice and clear themselves.
+            reservation.status = ReservationStatus.cancelled
+            # Recorded on the deployment, not just this reservation, so
+            # it survives past this one cancelled row and shows up on the
+            # fleet page - the periodic health check that gates access
+            # only knows the hardware is present and signalling; it has
+            # no way to see a real session fail to initialize, so without
+            # this an admin only learns about it if a student says so.
+            if resolved is not None and resolved.deployment is not None:
+                resolved.deployment.last_access_error = str(err)
+                resolved.deployment.last_access_error_at = datetime.utcnow()
+            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Could not start a session on the lab hardware: {err}",
             )
         reservation.weblab_session_url = session_url
         reservation.hardware_started_at = datetime.utcnow()
+        # A session just opened successfully - whatever the last failure
+        # was, it no longer describes this deployment's current state.
+        if resolved is not None and resolved.deployment is not None:
+            resolved.deployment.last_access_error = None
+            resolved.deployment.last_access_error_at = None
         db.commit()
     else:
         session_url = reservation.weblab_session_url

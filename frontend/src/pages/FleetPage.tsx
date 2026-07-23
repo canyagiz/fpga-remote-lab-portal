@@ -12,6 +12,7 @@ import {
   Board,
   Deployment,
   Device,
+  DetectedDevices,
   GapReport,
   Lab,
   LabRequirement,
@@ -397,6 +398,18 @@ export default function FleetPage() {
     attention.push({ text: `${g.template_name} on ${g.shuttle_name}: ${g.missing_count} unmet requirement${g.missing_count === 1 ? "" : "s"}`, section: "labs" }),
   );
   withdrawn.forEach((d) => attention.push({ text: `${d.lab_name} withdrawn — ${d.reason}`, section: "deployments" }));
+  // Distinct from `withdrawn`: the periodic health check can say a
+  // board is present and signalling and still be wrong, because it has
+  // no way to see a real session fail to initialize. Without this, that
+  // kind of failure is only visible to the student who hit it.
+  deployments
+    .filter((d) => d.last_access_error)
+    .forEach((d) =>
+      attention.push({
+        text: `${d.lab_name}: last access attempt failed — ${d.last_access_error}`,
+        section: "deployments",
+      }),
+    );
 
   const NAV: { id: Section; label: string; badge?: number; alert?: boolean }[] = [
     { id: "overview", label: "Overview", badge: attention.length || undefined, alert: attention.length > 0 },
@@ -975,6 +988,11 @@ export default function FleetPage() {
                                     <div className="flex flex-col gap-0.5">
                                       <Badge variant="success" className="w-fit">serving</Badge>
                                       <span className="font-mono text-[10px] text-muted-foreground">{dep.backend_url}</span>
+                                      {dep.last_access_error && (
+                                        <span className="text-xs" style={{ color: "var(--warning)" }}>
+                                          last access attempt failed: {dep.last_access_error}
+                                        </span>
+                                      )}
                                     </div>
                                   ) : (
                                     <div className="flex flex-col gap-0.5">
@@ -1775,12 +1793,11 @@ function LabeledInput({
   );
 }
 
-/** The setup wizard: turns an enrolled-but-empty shuttle into a working
- *  node. Three steps - SSH credentials, the hardware map (the "detected
- *  devices" step), then a live log while the playbook runs on the machine.
- *  Everything is pulled fresh over that SSH connection; nothing is copied
- *  from here. The token is rotated and injected server-side, so it never
- *  appears in this UI. */
+/** The setup wizard. Step 1 proves we can SSH in at all; step 2 scans the
+ *  machine for its hardware so the operator confirms what was detected
+ *  rather than typing device paths; step 3 runs the playbook with a live
+ *  log. The token is rotated and injected server-side, so it never shows
+ *  here. */
 function ProvisionWizard({
   shuttle,
   onClose,
@@ -1797,13 +1814,20 @@ function ProvisionWizard({
   const [sshPassword, setSshPassword] = useState("");
   const [sshHost, setSshHost] = useState("");
 
+  const [connecting, setConnecting] = useState(false);
+  const [connectMsg, setConnectMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   const [boards, setBoards] = useState<string[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [detected, setDetected] = useState<DetectedDevices | null>(null);
   const [usbBlaster, setUsbBlaster] = useState("/dev/usb-blaster");
   const [magewell, setMagewell] = useState("/dev/magewell");
   const [video0, setVideo0] = useState("/dev/video0");
   const [video1, setVideo1] = useState("/dev/video1");
   const [artyUsbBus, setArtyUsbBus] = useState("/dev/bus/usb");
+  const [editPaths, setEditPaths] = useState(false);
   const [uart, setUart] = useState<Record<string, { host: string; port: string }>>({});
+
   const [quartusPath, setQuartusPath] = useState("");
   const [installerMode, setInstallerMode] = useState<"upload" | "path">("upload");
   const [uploading, setUploading] = useState(false);
@@ -1813,28 +1837,77 @@ function ProvisionWizard({
   const [status, setStatus] = useState<ProvisionJobStatus | null>(null);
   const [starting, setStarting] = useState(false);
 
-  // Reset every field when the wizard is opened for a different shuttle.
   useEffect(() => {
     if (!shuttle) return;
     setStep(1);
     setSshUser("root");
     setSshPassword("");
     setSshHost(shuttle.address ?? "");
+    setConnecting(false);
+    setConnectMsg(null);
     setBoards([]);
+    setDetecting(false);
+    setDetected(null);
+    setUsbBlaster("/dev/usb-blaster");
+    setMagewell("/dev/magewell");
+    setVideo0("/dev/video0");
+    setVideo1("/dev/video1");
+    setArtyUsbBus("/dev/bus/usb");
+    setEditPaths(false);
     setUart({});
     setQuartusPath("");
-    setJobId(null);
-    setStatus(null);
-    setStarting(false);
     setInstallerMode("upload");
     setUploading(false);
     setUploadPct(0);
+    setJobId(null);
+    setStatus(null);
+    setStarting(false);
   }, [shuttle]);
 
+  const creds = () => ({ ssh_user: sshUser.trim(), ssh_password: sshPassword, ssh_host: sshHost.trim() || null });
   const needsQuartus = boards.some((b) => PROV_BOARDS.find((x) => x.value === b)?.intel);
   const artySelected = boards.includes("arty");
 
-  // Poll the job while it runs; stop the moment it finishes.
+  async function connect() {
+    if (!shuttle) return;
+    setConnecting(true);
+    setConnectMsg(null);
+    try {
+      const res = await api.checkSsh(shuttle.id, creds());
+      setConnectMsg({ ok: res.ok, text: res.message });
+    } catch (err) {
+      setConnectMsg({ ok: false, text: err instanceof api.ApiError ? err.message : "Connection failed" });
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  // Entering step 2 for the first time: scan the shuttle for its hardware.
+  useEffect(() => {
+    if (step !== 2 || !shuttle || detected || detecting) return;
+    let active = true;
+    setDetecting(true);
+    api
+      .detectDevices(shuttle.id, creds())
+      .then((d) => {
+        if (!active) return;
+        setDetected(d);
+        setUsbBlaster(d.usb_blaster.path);
+        setMagewell(d.capture.path);
+        if (d.videos[0]) setVideo0(d.videos[0]);
+        if (d.videos[1]) setVideo1(d.videos[1]);
+      })
+      .catch((err) => {
+        if (active) showError(err instanceof api.ApiError ? err.message : "Device scan failed");
+      })
+      .finally(() => {
+        if (active) setDetecting(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [step, shuttle, detected, detecting]);
+
   useEffect(() => {
     if (!shuttle || !jobId) return;
     let active = true;
@@ -1877,12 +1950,7 @@ function ProvisionWizard({
     setUploadPct(0);
     setQuartusPath("");
     try {
-      const res = await api.uploadInstaller(
-        shuttle.id,
-        { ssh_user: sshUser.trim(), ssh_password: sshPassword, ssh_host: sshHost.trim() || null },
-        f,
-        (p) => setUploadPct(p),
-      );
+      const res = await api.uploadInstaller(shuttle.id, creds(), f, (p) => setUploadPct(p));
       setQuartusPath(res.path);
     } catch (err) {
       showError(err instanceof api.ApiError ? err.message : "Upload failed");
@@ -1898,9 +1966,7 @@ function ProvisionWizard({
       const board_uart: Record<string, { host: string; port: number }> = {};
       for (const b of boards) {
         const u = uart[b];
-        if (u && u.host.trim()) {
-          board_uart[b] = { host: u.host.trim(), port: Number(u.port) || 20000 };
-        }
+        if (u && u.host.trim()) board_uart[b] = { host: u.host.trim(), port: Number(u.port) || 20000 };
       }
       const payload: ProvisionRequest = {
         ssh_user: sshUser.trim(),
@@ -1968,30 +2034,37 @@ function ProvisionWizard({
             {step === 1 && (
               <div className="mt-4 space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  The machine must already run Proxmox VE and be reachable over SSH. These credentials are used only for
-                  this run and are never stored.
+                  The machine must already run Proxmox VE and be reachable over SSH. Credentials are used only for
+                  provisioning and never stored. We test the connection before going further.
                 </p>
                 <div>
                   <Label htmlFor="prov-host">Address (SSH)</Label>
-                  <Input id="prov-host" value={sshHost} onChange={(e) => setSshHost(e.target.value)} placeholder="10.30.70.13" />
+                  <Input id="prov-host" value={sshHost} onChange={(e) => { setSshHost(e.target.value); setConnectMsg(null); }} placeholder="10.30.70.13" />
                 </div>
                 <div className="flex gap-2">
                   <div className="grow">
                     <Label htmlFor="prov-user">SSH user</Label>
-                    <Input id="prov-user" value={sshUser} onChange={(e) => setSshUser(e.target.value)} placeholder="root" />
+                    <Input id="prov-user" value={sshUser} onChange={(e) => { setSshUser(e.target.value); setConnectMsg(null); }} placeholder="root" />
                   </div>
                   <div className="grow">
                     <Label htmlFor="prov-pass">SSH password</Label>
-                    <Input id="prov-pass" type="password" value={sshPassword} onChange={(e) => setSshPassword(e.target.value)} />
+                    <Input id="prov-pass" type="password" value={sshPassword} onChange={(e) => { setSshPassword(e.target.value); setConnectMsg(null); }} />
                   </div>
                 </div>
+                {connectMsg && (
+                  <p className={"text-sm " + (connectMsg.ok ? "text-muted-foreground" : "text-destructive")}>
+                    {connectMsg.ok ? `✓ Connected — ${connectMsg.text}` : `✕ ${connectMsg.text}`}
+                  </p>
+                )}
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="secondary" onClick={requestClose}>
-                    Cancel
-                  </Button>
-                  <Button disabled={!sshUser.trim() || !sshPassword || !sshHost.trim()} onClick={() => setStep(2)}>
-                    Next
-                  </Button>
+                  <Button variant="secondary" onClick={requestClose}>Cancel</Button>
+                  {connectMsg?.ok ? (
+                    <Button onClick={() => setStep(2)}>Next</Button>
+                  ) : (
+                    <Button disabled={!sshUser.trim() || !sshPassword || !sshHost.trim() || connecting} onClick={connect}>
+                      {connecting ? "Connecting…" : "Connect"}
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -2010,6 +2083,47 @@ function ProvisionWizard({
                   </div>
                 </div>
 
+                <div className="rounded-md border p-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Detected on the shuttle</Label>
+                    {detecting && <span className="text-xs text-muted-foreground">Scanning…</span>}
+                  </div>
+                  {detected && !detecting && (
+                    <ul className="mt-2 space-y-1 text-xs">
+                      <li>
+                        {detected.usb_blaster.present ? "✓" : "—"} USB-Blaster: <code className="font-mono">{usbBlaster}</code>
+                        {detected.usb_blaster.info ? ` (${detected.usb_blaster.info.trim()})` : ""}
+                      </li>
+                      <li>
+                        {detected.capture.present ? "✓" : "—"} Capture card: <code className="font-mono">{magewell}</code>
+                      </li>
+                      <li>
+                        {detected.videos.length ? "✓" : "—"} Video: <code className="font-mono">{video0}</code>, <code className="font-mono">{video1}</code>
+                      </li>
+                    </ul>
+                  )}
+                  <div className="mt-2 flex items-center gap-3">
+                    <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setDetected(null)} disabled={detecting}>
+                      Re-scan
+                    </button>
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <input type="checkbox" checked={editPaths} onChange={(e) => setEditPaths(e.target.checked)} />
+                      Edit paths manually
+                    </label>
+                  </div>
+                  {editPaths && (
+                    <div className="mt-2 space-y-2">
+                      <LabeledInput label="USB-Blaster" value={usbBlaster} onChange={setUsbBlaster} />
+                      <LabeledInput label="Magewell capture" value={magewell} onChange={setMagewell} />
+                      <div className="flex gap-2">
+                        <LabeledInput label="video0" value={video0} onChange={setVideo0} />
+                        <LabeledInput label="video1" value={video1} onChange={setVideo1} />
+                      </div>
+                      {artySelected && <LabeledInput label="Arty USB bus" value={artyUsbBus} onChange={setArtyUsbBus} />}
+                    </div>
+                  )}
+                </div>
+
                 {boards.length > 0 && (
                   <div className="space-y-2">
                     <Label>Board UART bridge (host : port)</Label>
@@ -2025,67 +2139,49 @@ function ProvisionWizard({
 
                 {needsQuartus && (
                   <div className="space-y-2 rounded-md border p-3">
-                    <p className="text-xs text-muted-foreground">
-                      Intel/Altera device paths — prefer stable udev symlinks over raw bus paths, which renumber on replug.
-                    </p>
-                    <LabeledInput label="USB-Blaster" value={usbBlaster} onChange={setUsbBlaster} />
-                    <LabeledInput label="Magewell capture" value={magewell} onChange={setMagewell} />
-                    <div className="flex gap-2">
-                      <LabeledInput label="video0" value={video0} onChange={setVideo0} />
-                      <LabeledInput label="video1" value={video1} onChange={setVideo1} />
+                    <Label>Quartus installer</Label>
+                    <div className="flex gap-4 text-xs">
+                      <label className="flex items-center gap-1">
+                        <input type="radio" checked={installerMode === "upload"} onChange={() => setInstallerMode("upload")} />
+                        Upload from this computer
+                      </label>
+                      <label className="flex items-center gap-1">
+                        <input type="radio" checked={installerMode === "path"} onChange={() => setInstallerMode("path")} />
+                        Already on the shuttle
+                      </label>
                     </div>
-                    <div className="space-y-2">
-                      <Label>Quartus installer</Label>
-                      <div className="flex gap-4 text-xs">
-                        <label className="flex items-center gap-1">
-                          <input type="radio" checked={installerMode === "upload"} onChange={() => setInstallerMode("upload")} />
-                          Upload from this computer
-                        </label>
-                        <label className="flex items-center gap-1">
-                          <input type="radio" checked={installerMode === "path"} onChange={() => setInstallerMode("path")} />
-                          Already on the shuttle
-                        </label>
+                    {installerMode === "upload" ? (
+                      <div className="space-y-1">
+                        <input
+                          type="file"
+                          accept=".run"
+                          disabled={uploading}
+                          onChange={(e) => handleInstallerPick(e.target.files?.[0] ?? null)}
+                          className="block w-full text-xs file:mr-3 file:rounded-md file:border file:bg-muted file:px-3 file:py-1 file:text-xs"
+                        />
+                        {uploading && (
+                          <p className="text-xs text-muted-foreground">
+                            {uploadPct < 100 ? `Uploading to the portal… ${uploadPct}%` : "Transferring to the shuttle…"}
+                          </p>
+                        )}
+                        {quartusPath && !uploading && (
+                          <p className="text-xs text-muted-foreground">
+                            ✓ On the shuttle at <code className="font-mono">{quartusPath}</code>
+                          </p>
+                        )}
                       </div>
-                      {installerMode === "upload" ? (
-                        <div className="space-y-1">
-                          <input
-                            type="file"
-                            accept=".run"
-                            disabled={uploading || !sshPassword}
-                            onChange={(e) => handleInstallerPick(e.target.files?.[0] ?? null)}
-                            className="block w-full text-xs file:mr-3 file:rounded-md file:border file:bg-muted file:px-3 file:py-1 file:text-xs"
-                          />
-                          {!sshPassword && (
-                            <p className="text-xs text-warning-muted-foreground">Enter the SSH password in step 1 first.</p>
-                          )}
-                          {uploading && (
-                            <p className="text-xs text-muted-foreground">
-                              {uploadPct < 100 ? `Uploading to the portal… ${uploadPct}%` : "Transferring to the shuttle…"}
-                            </p>
-                          )}
-                          {quartusPath && !uploading && (
-                            <p className="text-xs text-muted-foreground">
-                              ✓ On the shuttle at <code className="font-mono">{quartusPath}</code>
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <Input value={quartusPath} onChange={(e) => setQuartusPath(e.target.value)} placeholder="/root/QuartusProgrammerSetup-25.1std.run" />
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Intel gates the download behind an account — either upload your licensed installer from your
-                        machine, or place it on the shuttle and give its path.
-                      </p>
-                    </div>
+                    ) : (
+                      <Input value={quartusPath} onChange={(e) => setQuartusPath(e.target.value)} placeholder="/root/QuartusProgrammerSetup-25.1std.run" />
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Intel gates the download behind an account — either upload your licensed installer from your machine,
+                      or place it on the shuttle and give its path.
+                    </p>
                   </div>
                 )}
 
-                {artySelected && <LabeledInput label="Arty USB bus" value={artyUsbBus} onChange={setArtyUsbBus} />}
-
                 <div className="flex justify-between gap-2 pt-2">
-                  <Button variant="secondary" onClick={() => setStep(1)}>
-                    Back
-                  </Button>
+                  <Button variant="secondary" onClick={() => setStep(1)}>Back</Button>
                   <Button disabled={boards.length === 0 || (needsQuartus && !quartusPath.trim()) || starting} onClick={start}>
                     {starting ? "Starting…" : "Start provisioning"}
                   </Button>
@@ -2119,4 +2215,3 @@ function ProvisionWizard({
     </Dialog>
   );
 }
-

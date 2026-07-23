@@ -297,6 +297,8 @@ export interface Deployment {
   backend_url: string | null;
   available: boolean;
   reason: string | null;
+  last_access_error: string | null;
+  last_access_error_at: string | null;
 }
 
 export interface DiscoveredHost {
@@ -345,6 +347,31 @@ export interface ProvisionJobStatus {
 
 export interface InstallerUploaded {
   path: string;
+}
+
+export interface SshCredentials {
+  ssh_user: string;
+  ssh_password: string;
+  ssh_host?: string | null;
+}
+
+export interface SshCheckResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface DetectedDevice {
+  present: boolean;
+  path: string;
+  info: string;
+}
+
+export interface DetectedDevices {
+  pve: string;
+  usb_blaster: DetectedDevice;
+  capture: DetectedDevice;
+  videos: string[];
+  serial: string[];
 }
 
 export class ApiError extends Error {

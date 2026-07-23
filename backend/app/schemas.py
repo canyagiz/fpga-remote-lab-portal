@@ -624,6 +624,12 @@ class DeploymentOut(BaseModel):
     backend_url: str | None
     available: bool
     reason: str | None
+    # The last time a real access attempt failed to initialize a session
+    # here, distinct from `available` - health-check-passing hardware can
+    # still fail a real session open. None once a session opens
+    # successfully again.
+    last_access_error: str | None
+    last_access_error_at: datetime | None
 
 
 class ShuttleAddressUpdate(BaseModel):
@@ -712,3 +718,31 @@ class ProvisionJobStatus(BaseModel):
 class InstallerUploaded(BaseModel):
     # Where the uploaded installer now lives on the shuttle.
     path: str
+
+
+# ---- SSH check + device detection (setup wizard) ---------------------
+
+
+class SshCredentials(BaseModel):
+    ssh_user: str = Field(min_length=1, max_length=64)
+    ssh_password: str = Field(min_length=1, max_length=256)
+    ssh_host: str | None = Field(default=None, max_length=255)
+
+
+class SshCheckResult(BaseModel):
+    ok: bool
+    message: str
+
+
+class DetectedDevice(BaseModel):
+    present: bool
+    path: str
+    info: str = ""
+
+
+class DetectedDevices(BaseModel):
+    pve: str = ""
+    usb_blaster: DetectedDevice
+    capture: DetectedDevice
+    videos: list[str] = []
+    serial: list[str] = []

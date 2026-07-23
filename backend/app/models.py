@@ -450,6 +450,17 @@ class LabDeployment(Base):
     # binding or touching the catalogue entry.
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # The last time a student's browser actually tried to open a session
+    # on this deployment's hardware and failed to, and why - distinct
+    # from `available` above, which only reflects the periodic fleet
+    # health check (hardware present, signal present). Present-and-
+    # signalling hardware can still fail to initialize a real session,
+    # and that failure is otherwise invisible anywhere in the fleet view
+    # until a student reports it. Cleared the next time a session opens
+    # successfully, so a stale failure does not linger after whatever
+    # caused it is fixed.
+    last_access_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_access_error_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     lab: Mapped["Lab"] = relationship()
     template: Mapped["LabTemplate"] = relationship()

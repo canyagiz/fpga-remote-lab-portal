@@ -65,7 +65,7 @@ def test_next_available_at_reflects_the_active_session_end(client):
     ends (usage_start_time + session length, set the moment the board is
     claimed - see services/availability.py), not session_ends_at, which
     only appears once the hardware session actually opens (see
-    test_failed_hardware_start_does_not_start_the_session_clock) and isn't
+    test_failed_hardware_start_cancels_the_reservation) and isn't
     set here since this test never calls /access."""
     from app.config import settings
 
@@ -206,18 +206,20 @@ def test_access_returns_502_when_hardware_session_start_fails(client):
     assert response.status_code == 502
 
 
-def test_failed_hardware_start_does_not_start_the_session_clock(client):
-    """Regression test: session_ends_at (the countdown the frontend shows
-    and counts down against) used to be derived from usage_start_time,
-    which access-now sets the instant a reservation is promoted to active -
-    before the hardware session is ever attempted. A hardware failure on
-    the first /access call then left the reservation "active" with a
-    countdown already ticking, even though the user was never let in. This
-    test covers the plain start_weblab_session failure (502) path - a
-    board access-now itself has no way to know is unhealthy up front. See
+def test_failed_hardware_start_cancels_the_reservation(client):
+    """A hardware failure on the first /access call - a plain
+    start_weblab_session exception, which access-now has no way to know
+    about up front (see
     test_fleet_deployments.py::test_access_now_refuses_to_create_a_reservation_for_an_unhealthy_board
-    for the (more common) case where the board's health is already known
-    at access-now time: there, no reservation is created at all.
+    for the case where the board's health is already known at access-now
+    time - there, no reservation is created at all) - must not leave the
+    user holding a reservation for hardware they were never let into.
+    Previously the reservation was kept "active" (with the session clock
+    not yet started) so the same reservation could be retried once
+    whatever failed cleared up; a user who could not get in read that as
+    still holding a reservation for hardware they had no access to, so
+    it is cancelled outright instead - a fresh access-now is the
+    recovery path.
     """
     lab_id = _create_lab(client)
     register(client, "user1", "user1@example.com")
@@ -232,11 +234,15 @@ def test_failed_hardware_start_does_not_start_the_session_clock(client):
     assert failed.status_code == 502
 
     mine = client.get("/api/reservations/mine").json()
-    reservation = next(r for r in mine if r["lab_id"] == lab_id)
-    assert reservation["status"] == "active"
-    assert reservation["usage_start_time"] is not None
-    assert reservation["session_ends_at"] is None
+    assert not any(r["lab_id"] == lab_id for r in mine)
 
+    # No active reservation left - the same stale attempt is refused
+    # rather than silently retried.
+    stale_retry = client.get(f"/api/labs/{lab_id}/access")
+    assert stale_retry.status_code == 403
+
+    # A fresh access-now is what lets the user try again.
+    client.post("/api/reservations/access-now", json={"lab_id": lab_id})
     with patch(
         "app.routers.labs.start_weblab_session",
         return_value="http://10.30.70.23:5003/foo/callback/fake-session-id",
