@@ -16,6 +16,8 @@ import {
   Lab,
   LabRequirement,
   LabTemplate,
+  ProvisionJobStatus,
+  ProvisionRequest,
   ScanResult,
   Shuttle,
   UnclaimedDevice,
@@ -98,6 +100,7 @@ export default function FleetPage() {
   // Which board/shuttle a network-backed endpoint is being set for.
   const [gpioBoard, setGpioBoard] = useState<Board | null>(null);
   const [addressShuttle, setAddressShuttle] = useState<Shuttle | null>(null);
+  const [provTarget, setProvTarget] = useState<Shuttle | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
 
   async function refresh() {
@@ -585,6 +588,14 @@ export default function FleetPage() {
                                   </Button>
                                   <Button size="sm" variant="secondary" disabled={busy === `rotate-${s.id}`} onClick={() => handleRotate(s)}>
                                     New token
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    disabled={s.role === "master"}
+                                    title={s.role === "master" ? "The master runs the portal — provision new shuttles instead" : undefined}
+                                    onClick={() => setProvTarget(s)}
+                                  >
+                                    Provision
                                   </Button>
                                   <Button size="sm" variant="destructive" disabled={busy === `del-${s.id}`} onClick={() => handleRemoveShuttle(s)}>
                                     Remove
@@ -1093,6 +1104,7 @@ export default function FleetPage() {
         onClose={() => setAddressShuttle(null)}
         onSave={(v) => addressShuttle && saveAddress(addressShuttle, v)}
       />
+      <ProvisionWizard shuttle={provTarget} onClose={() => setProvTarget(null)} onDone={refresh} />
     </div>
   );
 }
@@ -1697,3 +1709,312 @@ function TemplateForm({ signatures, onDone }: { signatures: string[]; onDone: ()
     </form>
   );
 }
+
+const PROV_BOARDS: { value: string; label: string; intel: boolean }[] = [
+  { value: "civ", label: "Cyclone IV (Intel)", intel: true },
+  { value: "cx", label: "Cyclone V/X (Intel)", intel: true },
+  { value: "cv", label: "Cyclone V (Intel)", intel: true },
+  { value: "arty", label: "Arty Z7 (Xilinx)", intel: false },
+];
+
+function LabeledInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="grow">
+      <Label>{label}</Label>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+/** The setup wizard: turns an enrolled-but-empty shuttle into a working
+ *  node. Three steps - SSH credentials, the hardware map (the "detected
+ *  devices" step), then a live log while the playbook runs on the machine.
+ *  Everything is pulled fresh over that SSH connection; nothing is copied
+ *  from here. The token is rotated and injected server-side, so it never
+ *  appears in this UI. */
+function ProvisionWizard({
+  shuttle,
+  onClose,
+  onDone,
+}: {
+  shuttle: Shuttle | null;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const { showError } = useToast();
+  const [step, setStep] = useState(1);
+
+  const [sshUser, setSshUser] = useState("root");
+  const [sshPassword, setSshPassword] = useState("");
+  const [sshHost, setSshHost] = useState("");
+
+  const [boards, setBoards] = useState<string[]>([]);
+  const [usbBlaster, setUsbBlaster] = useState("/dev/usb-blaster");
+  const [magewell, setMagewell] = useState("/dev/magewell");
+  const [video0, setVideo0] = useState("/dev/video0");
+  const [video1, setVideo1] = useState("/dev/video1");
+  const [artyUsbBus, setArtyUsbBus] = useState("/dev/bus/usb");
+  const [uart, setUart] = useState<Record<string, { host: string; port: string }>>({});
+  const [quartusPath, setQuartusPath] = useState("");
+
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<ProvisionJobStatus | null>(null);
+  const [starting, setStarting] = useState(false);
+
+  // Reset every field when the wizard is opened for a different shuttle.
+  useEffect(() => {
+    if (!shuttle) return;
+    setStep(1);
+    setSshUser("root");
+    setSshPassword("");
+    setSshHost(shuttle.address ?? "");
+    setBoards([]);
+    setUart({});
+    setQuartusPath("");
+    setJobId(null);
+    setStatus(null);
+    setStarting(false);
+  }, [shuttle]);
+
+  const needsQuartus = boards.some((b) => PROV_BOARDS.find((x) => x.value === b)?.intel);
+  const artySelected = boards.includes("arty");
+
+  // Poll the job while it runs; stop the moment it finishes.
+  useEffect(() => {
+    if (!shuttle || !jobId) return;
+    let active = true;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const s = await api.getProvisionStatus(shuttle.id, jobId);
+        if (!active) return;
+        setStatus(s);
+        if (s.status === "succeeded" || s.status === "failed") {
+          if (s.status === "succeeded") onDone();
+          return;
+        }
+        handle = setTimeout(tick, 1500);
+      } catch (err) {
+        if (active) showError(err instanceof api.ApiError ? err.message : "Lost track of the provisioning job");
+      }
+    };
+    tick();
+    return () => {
+      active = false;
+      if (handle) clearTimeout(handle);
+    };
+  }, [shuttle, jobId]);
+
+  function toggleBoard(v: string) {
+    setBoards((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
+  }
+
+  function setUartField(board: string, field: "host" | "port", value: string) {
+    setUart((prev) => {
+      const current = prev[board] ?? { host: "", port: "20000" };
+      return { ...prev, [board]: { ...current, [field]: value } };
+    });
+  }
+
+  async function start() {
+    if (!shuttle) return;
+    setStarting(true);
+    try {
+      const board_uart: Record<string, { host: string; port: number }> = {};
+      for (const b of boards) {
+        const u = uart[b];
+        if (u && u.host.trim()) {
+          board_uart[b] = { host: u.host.trim(), port: Number(u.port) || 20000 };
+        }
+      }
+      const payload: ProvisionRequest = {
+        ssh_user: sshUser.trim(),
+        ssh_password: sshPassword,
+        ssh_host: sshHost.trim() || null,
+        boards,
+        device_map: {
+          usb_blaster: usbBlaster.trim(),
+          magewell: magewell.trim(),
+          video0: video0.trim(),
+          video1: video1.trim(),
+          arty_usb_bus: artyUsbBus.trim(),
+        },
+        board_uart,
+        quartus_installer_path: quartusPath.trim(),
+      };
+      const started = await api.provisionShuttle(shuttle.id, payload);
+      setStatus(null);
+      setJobId(started.job_id);
+      setStep(3);
+    } catch (err) {
+      showError(err instanceof api.ApiError ? err.message : "Could not start provisioning");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const phase = status?.status ?? (jobId ? "pending" : "idle");
+  const running = phase === "pending" || phase === "running";
+  const finished = phase === "succeeded" || phase === "failed";
+
+  function requestClose() {
+    onClose();
+    if (phase === "succeeded") onDone();
+  }
+
+  return (
+    <Dialog open={shuttle !== null} onOpenChange={(o) => !o && requestClose()}>
+      <DialogContent className="max-w-2xl">
+        {shuttle && (
+          <>
+            <h2 className="text-lg font-semibold">Provision {shuttle.name}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Builds the lab and agent containers on this machine over SSH. Everything is pulled fresh — no image is copied.
+            </p>
+
+            <div className="mt-3 flex gap-2 text-xs">
+              {["SSH access", "Hardware", "Install"].map((label, i) => (
+                <span
+                  key={label}
+                  className={
+                    "rounded-full px-2 py-0.5 " +
+                    (step === i + 1
+                      ? "bg-primary text-primary-foreground"
+                      : step > i + 1
+                        ? "bg-muted text-foreground"
+                        : "bg-muted text-muted-foreground")
+                  }
+                >
+                  {i + 1}. {label}
+                </span>
+              ))}
+            </div>
+
+            {step === 1 && (
+              <div className="mt-4 space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  The machine must already run Proxmox VE and be reachable over SSH. These credentials are used only for
+                  this run and are never stored.
+                </p>
+                <div>
+                  <Label htmlFor="prov-host">Address (SSH)</Label>
+                  <Input id="prov-host" value={sshHost} onChange={(e) => setSshHost(e.target.value)} placeholder="10.30.70.13" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="grow">
+                    <Label htmlFor="prov-user">SSH user</Label>
+                    <Input id="prov-user" value={sshUser} onChange={(e) => setSshUser(e.target.value)} placeholder="root" />
+                  </div>
+                  <div className="grow">
+                    <Label htmlFor="prov-pass">SSH password</Label>
+                    <Input id="prov-pass" type="password" value={sshPassword} onChange={(e) => setSshPassword(e.target.value)} />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="secondary" onClick={requestClose}>
+                    Cancel
+                  </Button>
+                  <Button disabled={!sshUser.trim() || !sshPassword || !sshHost.trim()} onClick={() => setStep(2)}>
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <Label>Boards attached to this shuttle</Label>
+                  <div className="mt-1 grid grid-cols-2 gap-2">
+                    {PROV_BOARDS.map((b) => (
+                      <label key={b.value} className="flex items-center gap-2 rounded-md border p-2 text-sm">
+                        <input type="checkbox" checked={boards.includes(b.value)} onChange={() => toggleBoard(b.value)} />
+                        {b.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {boards.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Board UART bridge (host : port)</Label>
+                    {boards.map((b) => (
+                      <div key={b} className="flex items-center gap-2">
+                        <span className="w-12 font-mono text-xs">{b}</span>
+                        <Input value={uart[b]?.host ?? ""} onChange={(e) => setUartField(b, "host", e.target.value)} placeholder="10.30.70.50" />
+                        <Input className="w-24" value={uart[b]?.port ?? "20000"} onChange={(e) => setUartField(b, "port", e.target.value)} placeholder="20000" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {needsQuartus && (
+                  <div className="space-y-2 rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Intel/Altera device paths — prefer stable udev symlinks over raw bus paths, which renumber on replug.
+                    </p>
+                    <LabeledInput label="USB-Blaster" value={usbBlaster} onChange={setUsbBlaster} />
+                    <LabeledInput label="Magewell capture" value={magewell} onChange={setMagewell} />
+                    <div className="flex gap-2">
+                      <LabeledInput label="video0" value={video0} onChange={setVideo0} />
+                      <LabeledInput label="video1" value={video1} onChange={setVideo1} />
+                    </div>
+                    <div>
+                      <Label htmlFor="prov-quartus">Quartus installer path (on the shuttle)</Label>
+                      <Input id="prov-quartus" value={quartusPath} onChange={(e) => setQuartusPath(e.target.value)} placeholder="/root/QuartusProgrammerSetup-25.1std.run" />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Intel gates the download behind an account, so it cannot be fetched automatically — place your
+                        licensed installer on the machine and give its path here.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {artySelected && <LabeledInput label="Arty USB bus" value={artyUsbBus} onChange={setArtyUsbBus} />}
+
+                <div className="flex justify-between gap-2 pt-2">
+                  <Button variant="secondary" onClick={() => setStep(1)}>
+                    Back
+                  </Button>
+                  <Button disabled={boards.length === 0 || (needsQuartus && !quartusPath.trim()) || starting} onClick={start}>
+                    {starting ? "Starting…" : "Start provisioning"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <StatusBadge status={phase === "succeeded" ? "online" : phase === "failed" ? "offline" : "never_reported"} />
+                  <span className="text-muted-foreground">
+                    {running && "Provisioning… a first run can take several minutes."}
+                    {phase === "succeeded" && "Done. The agent should report within a minute."}
+                    {phase === "failed" && `Failed (exit ${status?.returncode ?? "?"}). See the log below.`}
+                  </span>
+                </div>
+                <pre className="max-h-80 overflow-auto rounded-md border bg-muted p-3 font-mono text-[11px] leading-relaxed">
+                  {(status?.log ?? []).join("\n") || "Starting…"}
+                </pre>
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" onClick={requestClose} disabled={running}>
+                    {running ? "Running…" : finished ? "Close" : "Cancel"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+

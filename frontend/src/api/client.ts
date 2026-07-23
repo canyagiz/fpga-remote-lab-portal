@@ -7,6 +7,9 @@ import {
   LabRequirement,
   LabTemplate,
   ScanResult,
+  ProvisionJobStarted,
+  ProvisionJobStatus,
+  ProvisionRequest,
   Shuttle,
   ShuttleEnrolled,
   UnclaimedDevice,
@@ -226,5 +229,12 @@ export const setDeploymentEnabled = (id: number, enabled: boolean) =>
   post<Deployment>(`/api/admin/fleet/deployments/${id}/enable?enabled=${enabled}`);
 export const deleteDeployment = (id: number) =>
   del<MessageResponse>(`/api/admin/fleet/deployments/${id}`);
+
+// --- provisioning (setup wizard) ---
+
+export const provisionShuttle = (id: number, data: ProvisionRequest) =>
+  post<ProvisionJobStarted>(`/api/admin/fleet/shuttles/${id}/provision`, data);
+export const getProvisionStatus = (id: number, jobId: string) =>
+  get<ProvisionJobStatus>(`/api/admin/fleet/shuttles/${id}/provision/${jobId}`);
 
 export { ApiError };

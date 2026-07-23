@@ -315,6 +315,34 @@ export interface ScanResult {
   hosts: DiscoveredHost[];
 }
 
+export interface ProvisionRequest {
+  ssh_user: string;
+  ssh_password: string;
+  ssh_host?: string | null;
+  boards: string[];
+  device_map: Record<string, string>;
+  board_uart: Record<string, { host: string; port: number }>;
+  quartus_installer_path?: string;
+}
+
+export interface ProvisionJobStarted {
+  success: boolean;
+  job_id: string;
+  shuttle_id: number;
+  status: string;
+}
+
+export interface ProvisionJobStatus {
+  job_id: string;
+  shuttle_id: number;
+  // "pending" | "running" | "succeeded" | "failed"
+  status: string;
+  returncode: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  log: string[];
+}
+
 export class ApiError extends Error {
   status: number;
   // Set from the response's Retry-After header when present (e.g. the
